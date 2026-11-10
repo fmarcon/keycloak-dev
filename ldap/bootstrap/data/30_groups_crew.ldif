@@ -1,0 +1,10 @@
+# Copiado de rroemhild/docker-test-openldap (MIT License, Copyright (c) 2016 Rafael Roemhild).
+# https://github.com/rroemhild/docker-test-openldap
+dn: cn=ship_crew,ou=people,dc=planetexpress,dc=com
+objectclass: Group
+objectclass: top
+groupType: 2147483650
+cn: ship_crew
+member: cn=Philip J. Fry,ou=people,dc=planetexpress,dc=com
+member: cn=Turanga Leela,ou=people,dc=planetexpress,dc=com
+member: cn=Bender Bending Rodriguez,ou=people,dc=planetexpress,dc=com

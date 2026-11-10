@@ -2,7 +2,7 @@
 
 Stack: Keycloak 26 atras de nginx com TLS, persistencia em PostgreSQL 16, user federation LDAP (OpenLDAP de testes) no realm `dev`.
 
-Imagens: `quay.io/keycloak/keycloak:26.0`, `postgres:16-alpine`, `nginx:1.27-alpine`, `ghcr.io/rroemhild/docker-test-openldap:master`, `osixia/phpldapadmin:latest`.
+Imagens: `quay.io/keycloak/keycloak:26.0`, `postgres:16-alpine`, `nginx:1.27-alpine`, `keycloak-dev-openldap` (imagem local em `ldap/`, baseada no [rroemhild/docker-test-openldap](https://github.com/rroemhild/docker-test-openldap), MIT), `osixia/phpldapadmin:latest`.
 
 ## Arquivos
 
@@ -13,7 +13,8 @@ Imagens: `quay.io/keycloak/keycloak:26.0`, `postgres:16-alpine`, `nginx:1.27-alp
 | `nginx/certs/` | certificados (`fullchain.pem`, `privkey.pem`) |
 | `nginx/certs/generate-dev-cert.sh` | gera certificado self-signed de dev |
 | `keycloak/realms/dev-realm.json` | realm `dev` com user federation LDAP (import no startup) |
-| `scripts/reset-ldap-imports.sh` | limpa imports LDAP stale apos restart do openldap |
+| `ldap/` | imagem Docker do OpenLDAP de dev (Dockerfile, entrypoint com seed unico, LDIFs de dados) |
+| `scripts/reset-ldap-imports.sh` | limpa imports LDAP stale apos re-seed do openldap |
 | `.env.example` | variaveis de ambiente |
 
 ## Uso
@@ -66,7 +67,7 @@ Acesse `https://localhost:8443` (o redirect HTTP chega em `http://localhost:8080
 
 ## User federation LDAP (dev)
 
-O compose sobe um OpenLDAP de testes (`ghcr.io/rroemhild/docker-test-openldap`) com dados fake da Planet Express (Futurama), junto com phpLDAPadmin para navegar/editar.
+O compose sobe um OpenLDAP de dev (imagem construida de `ldap/`, com dados fake da Planet Express do Futurama — LDIFs herdados do [rroemhild/docker-test-openldap](https://github.com/rroemhild/docker-test-openldap), MIT), junto com phpLDAPadmin para navegar/editar.
 
 - Realm `dev` importado automaticamente no startup do Keycloak (`--import-realm` + `keycloak/realms/dev-realm.json`) ja com o federation provider LDAP configurado.
 - LDAP interno em `openldap:10389` (sem porta no host). Bind: `cn=admin,dc=planetexpress,dc=com` / `GoodNewsEveryone`.
@@ -110,12 +111,13 @@ curl -k -X POST https://neo.ucs.br/realms/dev/protocol/openid-connect/token \
   -d "grant_type=password&client_id=admin-cli&username=fry&password=fry&scope=openid"
 ```
 
-### Caveats do LDAP de dev
+### Persistencia e re-seed do LDAP
 
-- A imagem e stateless: a cada boot o slapd e reconfigurado e os LDIFs re-seedados. Edicoes feitas no phpLDAPadmin sao perdidas em qualquer restart do container.
-- O re-seed gera novos `entryUUID`s; usuarios ja importados no Keycloak ficam com federation link stale e o login falha (401). Rode `./scripts/reset-ldap-imports.sh` para limpar os imports locais (nao toca no LDAP); o proximo login reimporta.
+- Dados do LDAP persistem nos volumes nomeados `openldap_data` (banco) e `openldap_config` (slapd.d). Restart, `down`+`up` e recreate mantem os dados e os `entryUUID`s — edicoes via phpLDAPadmin sobrevivem.
+- O seed (schema, overlays, dados Futurama) roda UMA vez, no primeiro boot com volumes vazios, controlado pelo marker `/var/lib/ldap/.seeded`.
+- Para re-semeiar do zero: `LDAP_RESEED=1 docker compose up -d openldap` (apaga banco e config do LDAP). Os `entryUUID`s mudam; usuarios ja importados no Keycloak ficam com federation link stale e o login falha (401). Rode `./scripts/reset-ldap-imports.sh` depois; o proximo login reimporta. Isso tambem acontece apos `docker compose down -v` (volumes do LDAP e do Postgres sao apagados juntos).
 - Import do realm so roda se o realm `dev` nao existir. Para reimportar do zero: apague o realm no console admin e reinicie o keycloak (ou `docker compose down -v`, que apaga tudo).
-- `docker compose logs -f openldap` mostra o re-seed acontecendo em cada boot.
+- Trocar `LDAP_DOMAIN` exige editar os LDIFs em `ldap/bootstrap/` (DNs hardcoded).
 
 ## Certificado
 
@@ -137,7 +139,7 @@ Depois de trocar certificado: `docker compose exec nginx nginx -s reload`.
 - Portas no host: `NGINX_HTTP_PORT` (80 interno) e `NGINX_HTTPS_PORT` (443 interno).
 - Postgres nao expoe porta no host; so a rede interna `keycloak-net`.
 - Rede interna fixa em `172.28.0.0/24` (gateway `172.28.0.1`): postgres `172.28.0.10`, keycloak `172.28.0.20`, nginx `172.28.0.30`, openldap `172.28.0.40`, phpldapadmin `172.28.0.50`.
-- Dados persistem no volume `postgres_data`.
+- Dados persistem nos volumes `postgres_data`, `openldap_data` e `openldap_config`.
 - Healthcheck do Keycloak usa a porta de management (9000) com `KC_HEALTH_ENABLED=true`. O nginx tambem expoe `/health` publicamente (proxy para a porta 9000). Metricas habilitadas com `KC_METRICS_ENABLED=true`.
 - O redirect HTTP usa `NGINX_HTTPS_PORT` para montar a URL; com porta 443 o sufixo e omitido.
 - HSTS esta comentado no template; habilite so com certificado valido e dominio fixo.
@@ -145,8 +147,8 @@ Depois de trocar certificado: `docker compose exec nginx nginx -s reload`.
 ## Limpeza
 
 ```bash
-docker compose down          # para os containers
-docker compose down -v       # para e apaga o volume do banco (realm, usuarios importados)
+docker compose down          # para os containers (dados do LDAP e do banco persistem)
+docker compose down -v       # para e apaga os volumes: banco, realm, usuarios e LDAP
 ```
 
-O LDAP nao tem volume: apos `down`+`up` ele re-seeda sozinho, mas os `entryUUID`s mudam e imports do Keycloak ficam stale — rode `./scripts/reset-ldap-imports.sh` apos religar.
+Apos `down`+`up` o LDAP mantem os `entryUUID`s e os imports do Keycloak continuam validos. Somente apos `down -v` ou `LDAP_RESEED=1` rode `./scripts/reset-ldap-imports.sh`.

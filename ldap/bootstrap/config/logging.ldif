@@ -1,0 +1,6 @@
+# Copiado de rroemhild/docker-test-openldap (MIT License, Copyright (c) 2016 Rafael Roemhild).
+# https://github.com/rroemhild/docker-test-openldap
+dn: cn=config
+changetype: modify
+replace: olcLogLevel
+olcLogLevel: stats

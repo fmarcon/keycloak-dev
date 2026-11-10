@@ -1,0 +1,7 @@
+# Copiado de rroemhild/docker-test-openldap (MIT License, Copyright (c) 2016 Rafael Roemhild).
+# https://github.com/rroemhild/docker-test-openldap
+dn: ou=people,dc=planetexpress,dc=com
+objectClass: top
+objectClass: organizationalUnit
+description: Planet Express crew
+ou: people
