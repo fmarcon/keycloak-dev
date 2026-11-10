@@ -1,0 +1,3 @@
+nginx/certs/privkey.pem
+nginx/certs/fullchain.pem
+.env
