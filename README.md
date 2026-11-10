@@ -25,10 +25,10 @@ cp .env.example .env
 # edite senhas fortes (POSTGRES_PASSWORD, KC_ADMIN_PASSWORD)
 ```
 
-O hostname padrao e `neo.ucs.br`; aponte-o no `/etc/hosts` do host:
+O hostname padrao e `auk.ucs.br`; aponte-o no `/etc/hosts` do host:
 
 ```bash
-echo "127.0.1.1 neo.ucs.br" | sudo tee -a /etc/hosts
+echo "127.0.1.1 auk.ucs.br" | sudo tee -a /etc/hosts
 ```
 
 Gere o certificado self-signed de dev e suba:
@@ -39,11 +39,11 @@ docker compose up -d
 docker compose logs -f keycloak
 ```
 
-Acesse `https://neo.ucs.br` (porta 443 por padrao). Certificado self-signed gera aviso no browser (aceite em dev). Login admin: `KC_ADMIN_USER`/`KC_ADMIN_PASSWORD` do `.env` (`admin`/`admin` por padrao, troque).
+Acesse `https://auk.ucs.br` (porta 443 por padrao). Certificado self-signed gera aviso no browser (aceite em dev). Login admin: `KC_ADMIN_USER`/`KC_ADMIN_PASSWORD` do `.env` (`admin`/`admin` por padrao, troque).
 
 No primeiro boot o Keycloak importa o realm `dev` com federation LDAP (veja secao abaixo): usuarios do LDAP logam com senha = uid (`fry`, `leela`, ...), sem cadastro no Keycloak.
 
-`http://neo.ucs.br` (porta 80) redireciona 301 para HTTPS.
+`http://auk.ucs.br` (porta 80) redireciona 301 para HTTPS.
 
 ### Variacao dev em localhost com portas altas
 
@@ -55,12 +55,12 @@ NGINX_HTTP_PORT=8080
 NGINX_HTTPS_PORT=8443
 ```
 
-Acesse `https://localhost:8443` (o redirect HTTP chega em `http://localhost:8080`). O certificado self-signed ja cobre `localhost` e `127.0.0.1` (SAN). Nesta variacao, as URLs das secoes abaixo trocam `neo.ucs.br` por `localhost:8443` (ex.: o teste de login LDAP).
+Acesse `https://localhost:8443` (o redirect HTTP chega em `http://localhost:8080`). O certificado self-signed ja cobre `localhost` e `127.0.0.1` (SAN). Nesta variacao, as URLs das secoes abaixo trocam `auk.ucs.br` por `localhost:8443` (ex.: o teste de login LDAP).
 
 ## Como o TLS funciona
 
 - TLS termina no nginx. Nginx fala HTTP simples com Keycloak na rede interna.
-- `KC_HOSTNAME` deve ser a URL publica HTTPS vista pelo browser (`https://neo.ucs.br` por padrao; `https://localhost:8443` na variacao dev).
+- `KC_HOSTNAME` deve ser a URL publica HTTPS vista pelo browser (`https://auk.ucs.br` por padrao; `https://localhost:8443` na variacao dev).
 - `KC_PROXY_HEADERS=xforwarded` faz o Keycloak confiar em `X-Forwarded-Proto`/`Host`/`For`. Sem isso, issuer e redirects saem como `http`.
 - `KC_HTTP_ENABLED=true` e necessario porque o trafego interno e HTTP.
 
@@ -106,7 +106,7 @@ Notas:
 Teste rapido (token com senha do LDAP):
 
 ```bash
-curl -k -X POST https://neo.ucs.br/realms/dev/protocol/openid-connect/token \
+curl -k -X POST https://auk.ucs.br/realms/dev/protocol/openid-connect/token \
   -d "grant_type=password&client_id=admin-cli&username=fry&password=fry&scope=openid"
 ```
 
@@ -125,7 +125,7 @@ Dev (self-signed):
 ```bash
 ./nginx/certs/generate-dev-cert.sh
 FORCE=1 ./nginx/certs/generate-dev-cert.sh           # regenerar
-CN=outro-host.local DAYS=365 ./nginx/certs/generate-dev-cert.sh   # CN e validade custom (padrao: CN=neo.ucs.br, 825 dias)
+CN=outro-host.local DAYS=365 ./nginx/certs/generate-dev-cert.sh   # CN e validade custom (padrao: CN=auk.ucs.br, 825 dias)
 ```
 
 Producao: substitua `nginx/certs/fullchain.pem` e `nginx/certs/privkey.pem` por certificado real (Let's Encrypt, CA interna). Monte os arquivos no mesmo path. Para Let's Encrypt, o desafio HTTP-01 funciona na porta 80 (nginx ja responde nela).

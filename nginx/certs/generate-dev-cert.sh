@@ -5,7 +5,7 @@ set -eu
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 DAYS="${DAYS:-825}"
-CN="${CN:-neo.ucs.br}"
+CN="${CN:-auk.ucs.br}"
 
 if [ -f "$DIR/fullchain.pem" ] && [ "${FORCE:-0}" != "1" ]; then
   echo "Certificado ja existe: $DIR/fullchain.pem"
