@@ -22,7 +22,7 @@ services:
     image: quay.io/keycloak/keycloak:26.0
     container_name: keycloak
     restart: unless-stopped
-    command: ["start"]
+    command: ["start", "--import-realm"]
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-keycloak}
@@ -38,8 +38,12 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
+    volumes:
+      - ./keycloak/realms:/opt/keycloak/data/import:ro
     depends_on:
       postgres:
+        condition: service_healthy
+      openldap:
         condition: service_healthy
     healthcheck:
       test:
@@ -52,6 +56,42 @@ services:
     networks:
       keycloak-net:
         ipv4_address: 172.28.0.20
+
+  openldap:
+    # LDAP de testes com dados pre-carregados (Futurama / planetexpress.com).
+    # Stateless por design: sem volumes; a cada boot o slapd e reconfigurado
+    # e os LDIFs re-seedados (edicoes feitas via phpLDAPadmin sao perdidas).
+    image: ghcr.io/rroemhild/docker-test-openldap:master
+    container_name: keycloak-openldap
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -H ldap://127.0.0.1:10389 -D 'cn=admin,dc=planetexpress,dc=com' -w GoodNewsEveryone -b 'dc=planetexpress,dc=com' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      keycloak-net:
+        ipv4_address: 172.28.0.40
+
+  phpldapadmin:
+    # Web UI para navegar/editar o LDAP (dev).
+    # Login: cn=admin,dc=planetexpress,dc=com / GoodNewsEveryone
+    image: osixia/phpldapadmin:latest
+    container_name: keycloak-phpldapadmin
+    restart: unless-stopped
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: "[{'name':'openldap','host':'ldap://openldap:10389'}]"
+      PHPLDAPADMIN_HTTPS: "false"
+      PHPLDAPADMIN_LDAP_CLIENT_TLS_REQCERT: "never"
+    ports:
+      - "${PHPLDAPADMIN_PORT:-8081}:80"
+    depends_on:
+      openldap:
+        condition: service_healthy
+    networks:
+      keycloak-net:
+        ipv4_address: 172.28.0.50
 
   nginx:
     image: nginx:1.27-alpine

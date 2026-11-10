@@ -1,0 +1,103 @@
+{
+  "realm": "dev",
+  "enabled": true,
+  "displayName": "Dev (LDAP federation)",
+  "components": {
+    "org.keycloak.storage.UserStorageProvider": [
+      {
+        "name": "openldap-dev",
+        "providerId": "ldap",
+        "subComponents": {
+          "org.keycloak.storage.ldap.mappers.LDAPStorageMapper": [
+            {
+              "name": "username",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "user.model.attribute": ["username"],
+                "ldap.attribute": ["uid"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["false"],
+                "is.mandatory.in.ldap": ["true"]
+              }
+            },
+            {
+              "name": "first name",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "user.model.attribute": ["firstName"],
+                "ldap.attribute": ["givenName"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["false"]
+              }
+            },
+            {
+              "name": "last name",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "user.model.attribute": ["lastName"],
+                "ldap.attribute": ["sn"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["false"]
+              }
+            },
+            {
+              "name": "email",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "user.model.attribute": ["email"],
+                "ldap.attribute": ["mail"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["false"],
+                "is.mandatory.in.ldap": ["false"]
+              }
+            },
+            {
+              "name": "full name",
+              "providerId": "full-name-ldap-mapper",
+              "config": {
+                "ldap.full.name.attribute": ["cn"],
+                "read.only": ["true"],
+                "write.only": ["false"]
+              }
+            },
+            {
+              "name": "groups",
+              "providerId": "group-ldap-mapper",
+              "config": {
+                "groups.dn": ["ou=people,dc=planetexpress,dc=com"],
+                "group.name.ldap.attribute": ["cn"],
+                "group.object.classes": ["Group"],
+                "membership.attribute.type": ["DN"],
+                "membership.ldap.attribute": ["member"],
+                "memberof.ldap.attribute": ["memberOf"],
+                "user.roles.retrieve.strategy": ["GET_GROUPS_FROM_USER_MEMBEROF_ATTRIBUTE"],
+                "mode": ["IMPORT"],
+                "preserve.group.inheritance": ["false"],
+                "ignore.missing.groups": ["false"]
+              }
+            }
+          ]
+        },
+        "config": {
+          "enabled": ["true"],
+          "vendor": ["other"],
+          "connectionUrl": ["ldap://openldap:10389"],
+          "bindDn": ["cn=admin,dc=planetexpress,dc=com"],
+          "bindCredential": ["GoodNewsEveryone"],
+          "usersDn": ["ou=people,dc=planetexpress,dc=com"],
+          "userObjectClasses": ["inetOrgPerson"],
+          "rdnLDAPAttribute": ["cn"],
+          "usernameLDAPAttribute": ["uid"],
+          "uuidLDAPAttribute": ["entryUUID"],
+          "editMode": ["READ_ONLY"],
+          "importEnabled": ["true"],
+          "searchScope": ["1"],
+          "validatePasswordPolicy": ["false"],
+          "trustEmail": ["false"],
+          "pagination": ["true"],
+          "connectionPooling": ["true"]
+        }
+      }
+    ]
+  }
+}
