@@ -14,7 +14,6 @@ Imagens: `quay.io/keycloak/keycloak:26.0`, `postgres:16-alpine`, `nginx:1.27-alp
 | `nginx/certs/generate-dev-cert.sh` | gera certificado self-signed de dev |
 | `keycloak/realms/dev-realm.json` | realm `dev` com user federation LDAP (import no startup) |
 | `ldap/` | imagem Docker do OpenLDAP de dev (Dockerfile, entrypoint com seed unico, LDIFs de dados) |
-| `scripts/reset-ldap-imports.sh` | limpa imports LDAP stale apos re-seed do openldap |
 | `.env.example` | variaveis de ambiente |
 
 ## Uso
@@ -115,7 +114,7 @@ curl -k -X POST https://neo.ucs.br/realms/dev/protocol/openid-connect/token \
 
 - Dados do LDAP persistem nos volumes nomeados `keycloak_openldap_data` (banco) e `keycloak_openldap_config` (slapd.d). Restart, `down`+`up` e recreate mantem os dados e os `entryUUID`s — edicoes via phpLDAPadmin sobrevivem.
 - O seed (schema, overlays, dados Futurama) roda UMA vez, no primeiro boot com volumes vazios, controlado pelo marker `/var/lib/ldap/.seeded`.
-- Para re-semeiar do zero: `LDAP_RESEED=1 docker compose up -d openldap` (apaga banco e config do LDAP). Os `entryUUID`s mudam; usuarios ja importados no Keycloak ficam com federation link stale e o login falha (401). Rode `./scripts/reset-ldap-imports.sh` depois; o proximo login reimporta. Isso tambem acontece apos `docker compose down -v` (volumes do LDAP e do Postgres sao apagados juntos).
+- Para re-semeiar do zero: `LDAP_RESEED=1 docker compose up -d openldap` (apaga banco e config do LDAP). Os `entryUUID`s mudam; usuarios ja importados no Keycloak ficam com federation link stale e o login falha (401). Para corrigir: apague o realm `dev` no console admin e reinicie o keycloak (realm reimportado do zero), ou `docker compose down -v` (apaga o Postgres junto).
 - Import do realm so roda se o realm `dev` nao existir. Para reimportar do zero: apague o realm no console admin e reinicie o keycloak (ou `docker compose down -v`, que apaga tudo).
 - Trocar `LDAP_DOMAIN` exige editar os LDIFs em `ldap/bootstrap/` (DNs hardcoded).
 
@@ -151,4 +150,4 @@ docker compose down          # para os containers (dados do LDAP e do banco pers
 docker compose down -v       # para e apaga os volumes: banco, realm, usuarios e LDAP
 ```
 
-Apos `down`+`up` o LDAP mantem os `entryUUID`s e os imports do Keycloak continuam validos. Somente apos `down -v` ou `LDAP_RESEED=1` rode `./scripts/reset-ldap-imports.sh`.
+Apos `down`+`up` o LDAP mantem os `entryUUID`s e os imports do Keycloak continuam validos — nada a fazer. Se o LDAP foi re-semeado com o banco preservado (`LDAP_RESEED=1` ou remocao manual apenas dos volumes `keycloak_openldap_*`), apague o realm `dev` no console admin e reinicie o keycloak para reimportar.

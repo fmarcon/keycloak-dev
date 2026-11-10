@@ -7,7 +7,7 @@
 # - seed (schema, overlays, senha do cn=config, dados Futurama) roda UMA vez,
 #   controlado pelo marker /var/lib/ldap/.seeded;
 # - LDAP_RESEED=1 apaga banco+config e re-seeda (entryUUIDs mudam! imports do
-#   Keycloak ficam stale; rode scripts/reset-ldap-imports.sh depois).
+#   Keycloak ficam stale; apague o realm dev e reinicie o keycloak).
 set -eu
 
 MARKER=/var/lib/ldap/.seeded
