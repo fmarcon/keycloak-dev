@@ -113,7 +113,7 @@ curl -k -X POST https://neo.ucs.br/realms/dev/protocol/openid-connect/token \
 
 ### Persistencia e re-seed do LDAP
 
-- Dados do LDAP persistem nos volumes nomeados `openldap_data` (banco) e `openldap_config` (slapd.d). Restart, `down`+`up` e recreate mantem os dados e os `entryUUID`s — edicoes via phpLDAPadmin sobrevivem.
+- Dados do LDAP persistem nos volumes nomeados `keycloak_openldap_data` (banco) e `keycloak_openldap_config` (slapd.d). Restart, `down`+`up` e recreate mantem os dados e os `entryUUID`s — edicoes via phpLDAPadmin sobrevivem.
 - O seed (schema, overlays, dados Futurama) roda UMA vez, no primeiro boot com volumes vazios, controlado pelo marker `/var/lib/ldap/.seeded`.
 - Para re-semeiar do zero: `LDAP_RESEED=1 docker compose up -d openldap` (apaga banco e config do LDAP). Os `entryUUID`s mudam; usuarios ja importados no Keycloak ficam com federation link stale e o login falha (401). Rode `./scripts/reset-ldap-imports.sh` depois; o proximo login reimporta. Isso tambem acontece apos `docker compose down -v` (volumes do LDAP e do Postgres sao apagados juntos).
 - Import do realm so roda se o realm `dev` nao existir. Para reimportar do zero: apague o realm no console admin e reinicie o keycloak (ou `docker compose down -v`, que apaga tudo).
@@ -139,7 +139,7 @@ Depois de trocar certificado: `docker compose exec nginx nginx -s reload`.
 - Portas no host: `NGINX_HTTP_PORT` (80 interno) e `NGINX_HTTPS_PORT` (443 interno).
 - Postgres nao expoe porta no host; so a rede interna `keycloak-net`.
 - Rede interna fixa em `172.28.0.0/24` (gateway `172.28.0.1`): postgres `172.28.0.10`, keycloak `172.28.0.20`, nginx `172.28.0.30`, openldap `172.28.0.40`, phpldapadmin `172.28.0.50`.
-- Dados persistem nos volumes `postgres_data`, `openldap_data` e `openldap_config`.
+- Dados persistem nos volumes `keycloak_postgres_data`, `keycloak_openldap_data` e `keycloak_openldap_config` (nomes explicitos, sem prefixo do projeto).
 - Healthcheck do Keycloak usa a porta de management (9000) com `KC_HEALTH_ENABLED=true`. O nginx tambem expoe `/health` publicamente (proxy para a porta 9000). Metricas habilitadas com `KC_METRICS_ENABLED=true`.
 - O redirect HTTP usa `NGINX_HTTPS_PORT` para montar a URL; com porta 443 o sufixo e omitido.
 - HSTS esta comentado no template; habilite so com certificado valido e dominio fixo.

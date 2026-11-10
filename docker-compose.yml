@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-keycloak}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-keycloak}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - keycloak_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-keycloak} -d ${POSTGRES_DB:-keycloak}"]
       interval: 10s
@@ -70,8 +70,8 @@ services:
       # 1 = apaga e re-semeia o LDAP no proximo boot (entryUUIDs mudam)
       LDAP_RESEED: "${LDAP_RESEED:-false}"
     volumes:
-      - openldap_data:/var/lib/ldap
-      - openldap_config:/etc/ldap/slapd.d
+      - keycloak_openldap_data:/var/lib/ldap
+      - keycloak_openldap_config:/etc/ldap/slapd.d
     healthcheck:
       test: ["CMD-SHELL", "ldapsearch -H ldap://127.0.0.1:10389 -D 'cn=admin,dc=planetexpress,dc=com' -w GoodNewsEveryone -b 'dc=planetexpress,dc=com' >/dev/null 2>&1"]
       interval: 10s
@@ -121,9 +121,12 @@ services:
         ipv4_address: 172.28.0.30
 
 volumes:
-  postgres_data:
-  openldap_data:
-  openldap_config:
+  keycloak_postgres_data:
+    name: keycloak_postgres_data
+  keycloak_openldap_data:
+    name: keycloak_openldap_data
+  keycloak_openldap_config:
+    name: keycloak_openldap_config
 
 networks:
   keycloak-net:
