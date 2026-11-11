@@ -12,6 +12,10 @@ upstream keycloak_backend {
     keepalive 32;
 }
 
+upstream phpldapadmin_backend {
+    server phpldapadmin:80;
+}
+
 # HTTP -> HTTPS
 server {
     listen 80;
@@ -66,5 +70,15 @@ server {
     location /health {
         proxy_pass http://keycloak:9000/health;
         access_log off;
+    }
+
+    # phpLDAPadmin em subpath: nginx faz proxy pass-through (sem reescrita
+    # de URI) e o Apache do container serve em /phpldapadmin via Alias.
+    location /phpldapadmin {
+        return 301 /phpldapadmin/;
+    }
+    location /phpldapadmin/ {
+        proxy_pass http://phpldapadmin_backend;
+        proxy_set_header X-Forwarded-Prefix /phpldapadmin;
     }
 }

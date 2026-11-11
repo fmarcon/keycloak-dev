@@ -96,6 +96,9 @@ services:
     ports:
       - "${PHPLDAPADMIN_PORT:-8081}:80"
     volumes:
+      # Conf do apache que adiciona Alias /phpldapadmin (startup.sh faz
+      # ln -sf para este arquivo no boot; webserver o usa direto).
+      - ./nginx/phpldapadmin-http.conf:/container/service/phpldapadmin/assets/apache2/http.conf:ro
       # Volume nomeado: sem isso a imagem cria volume anonimo e o config
       # gerado sobrevive a recriacao do container (config velho/errado).
       - keycloak_phpldapadmin_data:/var/www/phpldapadmin
