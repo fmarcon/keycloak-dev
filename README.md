@@ -12,6 +12,7 @@ Imagens: `quay.io/keycloak/keycloak:26.0`, `postgres:16-alpine`, `nginx:1.27-alp
 | `nginx/default.conf.template` | reverse proxy HTTPS + redirect HTTP, processado por envsubst |
 | `nginx/certs/` | certificados (`fullchain.pem`, `privkey.pem`) |
 | `nginx/certs/generate-dev-cert.sh` | gera certificado self-signed de dev |
+| `nginx/phpldapadmin-http.conf` | VirtualHost do Apache do phpLDAPadmin com `Alias /phpldapadmin` (subpath) |
 | `keycloak/realms/dev-realm.json` | realm `dev` com user federation LDAP (import no startup) |
 | `ldap/` | imagem Docker do OpenLDAP de dev (Dockerfile, entrypoint com seed unico, LDIFs de dados) |
 | `.env.example` | variaveis de ambiente |
@@ -70,7 +71,12 @@ O compose sobe um OpenLDAP de dev (imagem construida de `ldap/`, com dados fake 
 
 - Realm `dev` importado automaticamente no startup do Keycloak (`--import-realm` + `keycloak/realms/dev-realm.json`) ja com o federation provider LDAP configurado.
 - LDAP interno em `openldap:10389` (sem porta no host). Bind: `cn=admin,dc=planetexpress,dc=com` / `GoodNewsEveryone`.
-- phpLDAPadmin em `http://localhost:${PHPLDAPADMIN_PORT}` (8081 por padrao); mesmo login admin do LDAP.
+- phpLDAPadmin (mesmo login admin do LDAP):
+  - Pelo nginx (recomendado): `https://auk.ucs.br/phpldapadmin` (ou `https://localhost/phpldapadmin`).
+  - Acesso direto dev: `http://localhost:${PHPLDAPADMIN_PORT}` (8081 por padrao).
+- O phpLDAPadmin roda em subpath `/phpldapadmin`: o nginx faz proxy pass-through (`location /phpldapadmin/` -> `phpldapadmin:80` sem reescrita de URI) e o Apache do container serve nesse path via `Alias` definido em `nginx/phpldapadmin-http.conf`. O phpLDAPadmin gera links a partir do `SCRIPT_NAME`, entao o prefixo chega intacto a aplicacao.
+- `PHPLDAPADMIN_LDAP_HOSTS` no compose precisa do prefixo `#PYTHON2BASH:` (convencao interna da imagem osixia) para o valor `[{'openldap': [...]}]` ser parseado como estrutura e virar PHP valido no `config.php`; sem o prefixo a string vira literal e o site quebra com `Parse error`.
+- O `config.php` gerado persiste no volume nomeado `keycloak_phpldapadmin_data` (montado em `/var/www/phpldapadmin`); sem ele a imagem cria volume anonimo e o config antigo sobrevive a recriacao do container.
 - Mapeamento: `uid` -> username, `givenName`/`sn`/`mail` -> firstName/lastName/email, RDN `cn`, UUID `entryUUID`, grupos via `memberOf` (mode IMPORT: grupos LDAP viram grupos do Keycloak no primeiro login).
 - `editMode` READ_ONLY: senha valida via bind no LDAP; perfis nao sao editaveis pelo Keycloak.
 
@@ -135,10 +141,10 @@ Depois de trocar certificado: `docker compose exec nginx nginx -s reload`.
 ## Detalhes importantes
 
 - `KC_HOSTNAME_STRICT=false` permite acesso por outros hosts (dev). Em producao com dominio fixo, mude para `true`.
-- Portas no host: `NGINX_HTTP_PORT` (80 interno) e `NGINX_HTTPS_PORT` (443 interno).
+- Portas no host: `NGINX_HTTP_PORT` (80 interno) e `NGINX_HTTPS_PORT` (443 interno). O phpLDAPadmin ainda publica `PHPLDAPADMIN_PORT` (8081) para acesso direto de dev, alem do subpath `/phpldapadmin` no nginx.
 - Postgres nao expoe porta no host; so a rede interna `keycloak-net`.
 - Rede interna fixa em `172.28.0.0/24` (gateway `172.28.0.1`): postgres `172.28.0.10`, keycloak `172.28.0.20`, nginx `172.28.0.30`, openldap `172.28.0.40`, phpldapadmin `172.28.0.50`.
-- Dados persistem nos volumes `keycloak_postgres_data`, `keycloak_openldap_data` e `keycloak_openldap_config` (nomes explicitos, sem prefixo do projeto).
+- Dados persistem nos volumes `keycloak_postgres_data`, `keycloak_openldap_data`, `keycloak_openldap_config` e `keycloak_phpldapadmin_data` (nomes explicitos, sem prefixo do projeto).
 - Healthcheck do Keycloak usa a porta de management (9000) com `KC_HEALTH_ENABLED=true`. O nginx tambem expoe `/health` publicamente (proxy para a porta 9000). Metricas habilitadas com `KC_METRICS_ENABLED=true`.
 - O redirect HTTP usa `NGINX_HTTPS_PORT` para montar a URL; com porta 443 o sufixo e omitido.
 - HSTS esta comentado no template; habilite so com certificado valido e dominio fixo.
@@ -147,7 +153,7 @@ Depois de trocar certificado: `docker compose exec nginx nginx -s reload`.
 
 ```bash
 docker compose down          # para os containers (dados do LDAP e do banco persistem)
-docker compose down -v       # para e apaga os volumes: banco, realm, usuarios e LDAP
+docker compose down -v       # para e apaga os volumes: banco, realm, usuarios, LDAP e config do phpLDAPadmin
 ```
 
 Apos `down`+`up` o LDAP mantem os `entryUUID`s e os imports do Keycloak continuam validos — nada a fazer. Se o LDAP foi re-semeado com o banco preservado (`LDAP_RESEED=1` ou remocao manual apenas dos volumes `keycloak_openldap_*`), apague o realm `dev` no console admin e reinicie o keycloak para reimportar.
