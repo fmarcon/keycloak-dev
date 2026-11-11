@@ -89,11 +89,16 @@ services:
     container_name: keycloak-phpldapadmin
     restart: unless-stopped
     environment:
-      PHPLDAPADMIN_LDAP_HOSTS: "[{'name':'openldap','host':'ldap://openldap:10389'}]"
+      # osixia so interpreta estrutura se prefixado com #PYTHON2BASH:
+      PHPLDAPADMIN_LDAP_HOSTS: "#PYTHON2BASH:[{'openldap': [{'server': [{'port': 10389}]}]}]"
       PHPLDAPADMIN_HTTPS: "false"
       PHPLDAPADMIN_LDAP_CLIENT_TLS_REQCERT: "never"
     ports:
       - "${PHPLDAPADMIN_PORT:-8081}:80"
+    volumes:
+      # Volume nomeado: sem isso a imagem cria volume anonimo e o config
+      # gerado sobrevive a recriacao do container (config velho/errado).
+      - keycloak_phpldapadmin_data:/var/www/phpldapadmin
     depends_on:
       openldap:
         condition: service_healthy
@@ -127,6 +132,8 @@ volumes:
     name: keycloak_openldap_data
   keycloak_openldap_config:
     name: keycloak_openldap_config
+  keycloak_phpldapadmin_data:
+    name: keycloak_phpldapadmin_data
 
 networks:
   keycloak-net:
