@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>{{ app_title }}</title>
+<style>
+ body { font-family: system-ui, sans-serif; max-width: 1000px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.5; }
+ h1 { border-bottom: 2px solid #ddd; padding-bottom: .4rem; }
+ table { border-collapse: collapse; width: 100%; }
+ th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid #eee; vertical-align: top; }
+ code, pre { background: #f4f4f4; padding: .1rem .3rem; border-radius: 4px; font-size: .9em; }
+ pre { padding: 1rem; overflow: auto; }
+ a.btn { display: inline-block; padding: .5rem 1.1rem; background: #2152a1; color: #fff; text-decoration: none; border-radius: 6px; }
+ a.logout { background: #a12c2c; }
+ .nav a { margin-right: .8rem; }
+</style>
+</head>
+<body>
+<h1>{{ app_subtitle }}</h1>
+<p class="nav">
+  <a href="{{ url_for('index') }}">Home</a>
+  {% if id_claims %}| <a href="{{ url_for('me') }}">/me</a> | <a class="logout" href="{{ url_for('logout') }}">sair</a>{% endif %}
+</p>
+
+{% if not id_claims %}
+  <p>Voce nao esta autenticado no Keycloak.</p>
+  <p><a class="btn" href="{{ url_for('auth') }}">Login com Keycloak</a></p>
+{% else %}
+  <p>Logado como <strong>{{ id_claims.get('preferred_username') or id_claims.get('name') }}</strong>
+     (subject <code>{{ id_claims.get('sub') }}</code>).</p>
+{% endif %}
+
+{% if section == 'me' %}
+<h2>userinfo {{ userinfo_label }}</h2>
+<table>
+{% for k, v in userinfo.items() %}<tr><td><code>{{ k }}</code></td><td>{{ v }}</td></tr>{% endfor %}
+</table>
+
+<h2>ID token &mdash; claims {{ idtoken_label }}</h2>
+<table>
+{% for k, v in id_claims.items() %}<tr><td><code>{{ k }}</code></td><td>{{ v }}</td></tr>{% endfor %}
+</table>
+
+<h2>Access token &mdash; payload (nao validado aqui; so para entender)</h2>
+<pre>{{ access_claims | tojson(indent=2) }}</pre>
+{% endif %}
+
+</body>
+</html>

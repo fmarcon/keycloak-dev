@@ -12,5 +12,11 @@ dependencies = [
     "cryptography>=42.0",  # PyJWT: validacao RS256 (chave RSA via JWKS)
 ]
 
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+order-by-type = false  # ordenar import/first-name misturado em ordem alfabética
+
 [dependency-groups]
 dev = ["ruff>=0.8"]
