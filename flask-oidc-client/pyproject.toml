@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Laboratorio: client OpenID Connect (Flask) para o Keycloak dev"
 requires-python = ">=3.12"
 dependencies = [
+    "authlib>=1.3",  # high-level: OAuth/OIDC clients (flask integration)
     "flask>=3.0",
     "requests>=2.32",
     "pyjwt>=2.9",
@@ -11,5 +12,5 @@ dependencies = [
     "cryptography>=42.0",  # PyJWT: validacao RS256 (chave RSA via JWKS)
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["ruff>=0.8"]

@@ -182,6 +182,27 @@ Notas:
 - Client com secret enviado via body (`OIDC_CLIENT_AUTH_METHOD=post`, padrao do Keycloak) ou HTTP Basic (`basic`).
 - Proximos passos sugeridos: refresh token, PKCE (client public), claims de roles/groups no token.
 
+### Versao Authlib (alto nivel)
+
+Mesmo laboratorio em `app_authlib.py`, mas usando a biblioteca **Authlib** (integracao Flask p/ OAuth/OIDC) em vez de implementar o fluxo na mao. Roda em **`http://localhost:5000`** para conviver com o `app.py` (porta 5000).
+
+```bash
+uv run python app_authlib.py     # porta 5000
+```
+
+O que a lib abstrai em relacao ao `app.py`:
+
+| Passo | `app.py` (manual) | `app_authlib.py` (Authlib) |
+|---|---|---|
+| Descoberta | `discover()` + cache do `.well-known` | `server_metadata_url` no `oauth.register` |
+| URL de auth | monta `state`+`nonce` manual | `authorize_redirect()` (guarda na sessao) |
+| Troca code por tokens | `requests.post` + secret | `authorize_access_token()` |
+| Validacao do ID token | JWKS/iss/aud/exp/nonce manual | automatica; claims em `token['userinfo']` |
+| userinfo | GET Bearer manual | `userinfo()` |
+| Logout | monta `end_session` manual | `load_server_metadata()['end_session_endpoint']` (sem helper) |
+
+Nota: o `.env` e unico; a porta do redirect (`5000` vs `5000`) depende de qual app roda. Troque `OIDC_REDIRECT_URI`/`OIDC_POST_LOGOUT_REDIRECT_URI` no `.env` (ou passe via env) e registre a mesma URL no client do Keycloak.
+
 ## Certificado
 
 Dev (self-signed):
