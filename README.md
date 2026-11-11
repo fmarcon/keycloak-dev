@@ -124,6 +124,64 @@ curl -k -X POST https://auk.ucs.br/realms/dev/protocol/openid-connect/token \
 - Import do realm so roda se o realm `dev` nao existir. Para reimportar do zero: apague o realm no console admin e reinicie o keycloak (ou `docker compose down -v`, que apaga tudo).
 - Trocar `LDAP_DOMAIN` exige editar os LDIFs em `ldap/bootstrap/` (DNs hardcoded).
 
+## Laboratorio Flask + OpenID Connect (client)
+
+Um client OIDC de exemplo em Flask (`flask-oidc-client/`), rodando no host com `uv`, autenticando contra o realm `dev` desta stack. Usa o fluxo **Authorization Code** com client **confidential**, implementado na mao (`requests` + PyJWT) para aprender o protocolo.
+
+### Configurar o client no Keycloak
+
+Console admin `https://auk.ucs.br/admin` (realm `dev`) -> **Clients -> Create client**:
+
+- Client ID: `flask-lab`, Client type: **Confidential**
+- Capability config: manter defaults (Standard flow = Authorization Code)
+- Valid redirect URIs: `http://localhost:5000/callback`
+- Valid post logout redirect URIs: `http://localhost:5000/*`
+- Criar; aba **Credentials** -> copiar o client secret
+
+### Rodar
+
+```bash
+cd flask-oidc-client
+cp .env.example .env        # PASSO OBRIGATORIO
+# edite o .env: OIDC_CLIENT_SECRET (+ troque SECRET_KEY)
+uv sync
+uv run python app.py
+```
+
+Sem `.env`, o app nao sobe e aponta o erro pedindo o secret (todas as outras variaveis tem default alinhado ao stack). A **unica variavel obrigatoria e `OIDC_CLIENT_SECRET`** (aba Credentials do client no Keycloak).
+
+Abra `http://localhost:5000` e faca login com usuario do LDAP (`fry`/`fry`, ...).
+
+### Variaveis de ambiente
+
+| Variavel | Default | Obrigatoria | Funcao |
+|---|---|---|---|
+| `OIDC_ISSUER_URL` | `https://auk.ucs.br/realms/dev` | nao | issuer do realm; endpoints descobertos via `.well-known` |
+| `OIDC_CLIENT_ID` | `flask-lab` | nao | client criado no Keycloak |
+| `OIDC_CLIENT_SECRET` | — | **sim** | segredo do client (aba Credentials no console admin) |
+| `OIDC_REDIRECT_URI` | `http://localhost:5000/callback` | nao | deve bater com "Valid redirect URIs" do client |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | `http://localhost:5000/` | nao | deve bater com "Valid post logout redirect URIs" do client |
+| `OIDC_CLIENT_AUTH_METHOD` | `post` | nao | como o client se autentica no token endpoint: `post` (secret no body) ou `basic` (HTTP Basic) |
+| `OIDC_CA_BUNDLE` | `nginx/certs/fullchain.pem` | nao | CA self-signed do Keycloak de dev (apague a linha para usar a CA do sistema) |
+| `SECRET_KEY` | gerada a cada boot | nao (recomendada fixa) | assina o cookie de sessao do Flask; sem valor fixo, o login cai a cada restart |
+
+### O que o laboratorio mostra
+
+| Rota | Aprendizado |
+|---|---|
+| `/auth` | monta a URL de autorizacao (`state` + `nonce`) e redireciona |
+| `/callback` | troca o `code` por tokens e valida o ID token via JWKS (`iss`, `aud`, `exp`, `nonce`) |
+| `/me` | userinfo (endpoint protegido) + claims do ID token + payload do access token |
+| `/logout` | `end_session_endpoint` no Keycloak + limpa a sessao |
+
+Notas:
+
+- Os endpoints sao descobertos em runtime via `/.well-known/openid-configuration` (nada hardcoded).
+- TLS: o Keycloak de dev usa cert self-signed; por padrao o app usa `OIDC_CA_BUNDLE = nginx/certs/fullchain.pem` como CA (sem `verify=False`). Com cert valido, apague a linha do `.env`.
+- A sessao do Flask e um cookie assinado (limite ~4 KB); com tokens grandes, troque por sessao server-side (ex.: Redis).
+- Client com secret enviado via body (`OIDC_CLIENT_AUTH_METHOD=post`, padrao do Keycloak) ou HTTP Basic (`basic`).
+- Proximos passos sugeridos: refresh token, PKCE (client public), claims de roles/groups no token.
+
 ## Certificado
 
 Dev (self-signed):

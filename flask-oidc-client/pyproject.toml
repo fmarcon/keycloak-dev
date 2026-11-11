@@ -1,0 +1,15 @@
+[project]
+name = "flask-oidc-client"
+version = "0.1.0"
+description = "Laboratorio: client OpenID Connect (Flask) para o Keycloak dev"
+requires-python = ">=3.12"
+dependencies = [
+    "flask>=3.0",
+    "requests>=2.32",
+    "pyjwt>=2.9",
+    "python-dotenv>=1.0",
+    "cryptography>=42.0",  # PyJWT: validacao RS256 (chave RSA via JWKS)
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.8"]
