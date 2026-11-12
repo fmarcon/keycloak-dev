@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "Laboratorio: client OpenID Connect (Flask) para o Keycloak dev"
 requires-python = ">=3.12"
 dependencies = [
-    "authlib>=1.3",  # high-level: OAuth/OIDC clients (flask integration)
+    "authlib>=1.3",      # high-level: OAuth/OIDC clients (flask integration)
     "flask>=3.0",
+    "python-keycloak>=4",  # keycloak-specific OIDC client
     "requests>=2.32",
     "pyjwt>=2.9",
     "python-dotenv>=1.0",
