@@ -34,7 +34,7 @@ Idioma do projeto: português do Brasil em README, comentários, docstrings e me
 | `nginx/phpldapadmin-http.conf` | VirtualHost do Apache com `Alias /phpldapadmin` |
 | `nginx/certs/generate-dev-cert.sh` | gera certificado self-signed de dev |
 | `nginx/certs/fullchain.pem`, `privkey.pem` | certificado de dev, **não versionados** |
-| `keycloak/realms/dev-realm.json` | realm `dev` + federation LDAP, importado no startup |
+| `keycloak/realms/dev-realm.json` | realm `dev` + federation LDAP + client `flask-lab`, importado no startup |
 | `ldap/Dockerfile` | imagem OpenLDAP própria (baseada em rroemhild/docker-test-openldap, MIT) |
 | `ldap/entrypoint.sh` | seed único controlado por marker + slapd em foreground |
 | `ldap/bootstrap/config/*.ldif` | schema `msad`, overlay `memberof`, logging |
@@ -111,7 +111,7 @@ uv run ruff check
 # trocar OIDC_REDIRECT_URI/OIDC_POST_LOGOUT_REDIRECT_URI no .env e reiniciar o app
 ```
 
-Client `flask-lab` precisa existir no Keycloak (realm `dev`, Confidential). Redirects: `http://localhost:5000/callback` (acesso direto) e `https://auk.ucs.br/flask/callback` (nginx); post logout: `http://localhost:5000/*` e `https://auk.ucs.br/flask/*`.
+Client `flask-lab` é importado de `dev-realm.json` no boot do zero (realm `dev`, Confidential, secret fixo de dev `flask-lab-dev-secret`). Redirects: `http://localhost:5000/callback` (acesso direto) e `https://auk.ucs.br/flask/callback` (nginx); post logout: `http://localhost:5000/*` e `https://auk.ucs.br/flask/*`. Em realm já existente o import não roda — ajustar no console.
 
 ## Credenciais de dev
 
@@ -151,6 +151,7 @@ Tudo acima é fake e público no README. Nunca reutilizar em produção.
 | segundo app Flask não sobe | todos usam `localhost:5000` | rodar um por vez ou sobrescrever porta/redirect no `.env` |
 | `/flask/` retorna 502 | app parado ou ainda escutando em `127.0.0.1:5000` | reiniciar `uv run python app.py`; o código agora escuta em `0.0.0.0` |
 | login via `/flask/` falha com `invalid_request_uri` | URLs do subpath não cadastradas no client `flask-lab` ou `.env` no perfil errado | cadastrar `https://auk.ucs.br/flask/callback` no Keycloak e ajustar `OIDC_REDIRECT_URI` |
+| Keycloak não sobe com `Script upload is disabled` | client importado com `authorizationSettings` e política JS inline | remover `authorizationSettings` do client no realm JSON |
 | LDAP não sobe com domínio novo | DNs `dc=planetexpress,dc=com` hardcoded nos LDIFs e no bind | editar `ldap/bootstrap/data/*.ldif`, `Dockerfile` e `dev-realm.json` juntos |
 | redirect HTTP errado em porta alta | nginx monta a URL com `NGINX_HTTPS_PORT` | manter a variável igual à porta publicada |
 
@@ -179,6 +180,7 @@ Limitações conscientes: o payload do access token é apenas decodificado (sem 
 - **Três clients Flask em vez de um**: o objetivo é comparar implementação manual, Authlib e python-keycloak. Duplicação de config no app python-keycloak é intencional para manter a comparação legível.
 - **Senha do LDAP = uid e dados fake**: reduz atrito didático; aceitável apenas porque o ambiente é local.
 - **Flask servido pelo nginx em `/flask/`**: o app roda no host e o nginx o alcança via `host.docker.internal` (`extra_hosts: host-gateway` no Compose). Exige bind em `0.0.0.0` e `ProxyFix` para `X-Forwarded-Prefix`; o acesso direto em `localhost:5000` continua valendo. Trade-off: dev server exposto na rede local e `ProxyFix` confia nos headers `X-Forwarded-*`.
+- **Client `flask-lab` versionado no realm JSON**: extraído de um export real do Keycloak e mesclado em `dev-realm.json`, com secret fixo de dev `flask-lab-dev-secret` e as URIs do console somadas às do README. `authorizationSettings` (política JS padrão) foi removido porque o import em production falha com `Script upload is disabled`. Trade-off: o secret fake entra no git (como o bind Credential do LDAP) e o import só vale para realm novo — em realm existente é preciso ajustar no console.
 
 ### Backlog / próximos passos
 

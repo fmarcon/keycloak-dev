@@ -68,7 +68,7 @@ O TLS termina no nginx; o tráfego entre nginx e Keycloak é HTTP simples na red
 | `nginx/certs/` | certificados `fullchain.pem` e `privkey.pem` |
 | `nginx/certs/generate-dev-cert.sh` | gera o certificado self-signed de dev |
 | `nginx/phpldapadmin-http.conf` | VirtualHost do Apache com `Alias /phpldapadmin` (subpath) |
-| `keycloak/realms/dev-realm.json` | realm `dev` com federação LDAP (importado no startup) |
+| `keycloak/realms/dev-realm.json` | realm `dev` com federação LDAP e client `flask-lab` (importado no startup) |
 | `ldap/` | imagem Docker do OpenLDAP de dev (Dockerfile, entrypoint com seed único e LDIFs) |
 | `flask-oidc-client/` | os três clients OIDC de exemplo |
 
@@ -183,25 +183,26 @@ Em `flask-oidc-client/` há três clients de exemplo que rodam no host com `uv` 
 
 ### 1. Configurar o client no Keycloak
 
-No console admin (`https://auk.ucs.br/admin`, realm `dev`), vá em **Clients → Create client**:
+No boot do zero (realm `dev` recriado do nada), o client `flask-lab` já vem pronto em `keycloak/realms/dev-realm.json`: tipo **Confidential**, Standard flow habilitado e secret fixo de dev `flask-lab-dev-secret`. As URIs cadastradas são:
 
-- Client ID: `flask-lab`, Client type: **Confidential**
-- Capability config: manter os defaults (Standard flow = Authorization Code)
-- Valid redirect URIs: `http://localhost:5000/callback` (acrescente `https://auk.ucs.br/flask/callback` se quiser acessar pelo nginx)
-- Valid post logout redirect URIs: `http://localhost:5000/*` (acrescente `https://auk.ucs.br/flask/*` para o nginx)
-- Após criar, abra a aba **Credentials** e copie o client secret.
+- Valid redirect URIs: `http://auk.ucs.br/flask/callback/*`, `http://localhost:5000/callback`, `https://auk.ucs.br/flask/callback` e `https://localhost:8443/flask/callback`
+- Valid post logout redirect URIs: `http://auk.ucs.br/flask/*`, `http://localhost:5000/*`, `https://auk.ucs.br/flask/*` e `https://localhost:8443/flask/*`
+
+O client exportado também mantém `serviceAccountsEnabled` e `directAccessGrantsEnabled`. A autorização fina (`authorizationSettings`, com uma política JS padrão) foi removida: o Keycloak em modo production recusa importar políticas JS inline e falha com `Script upload is disabled`.
+
+Como o `--import-realm` só importa realms que ainda não existem, se o realm `dev` já estiver criado ajuste o client no console (`https://auk.ucs.br/admin` → **Clients → flask-lab**) ou apague o realm e reinicie o Keycloak para reimportar. O secret acima é fictício, de dev — nunca use em produção.
 
 ### 2. Rodar
 
 ```bash
 cd flask-oidc-client
 cp .env.example .env        # passo obrigatório
-# edite o .env: cole o OIDC_CLIENT_SECRET e troque o SECRET_KEY
+# o .env já traz o OIDC_CLIENT_SECRET fixo de dev; troque apenas o SECRET_KEY
 uv sync
 uv run python app.py
 ```
 
-Sem o `.env`, o app não sobe e avisa que falta o secret. Todas as outras variáveis já vêm com valores alinhados ao stack — **a única obrigatória é `OIDC_CLIENT_SECRET`** (aba Credentials do client no Keycloak).
+Sem o `.env`, o app não sobe e avisa que falta o secret. Todas as variáveis já vêm com valores alinhados ao stack, inclusive o `OIDC_CLIENT_SECRET` fixo `flask-lab-dev-secret`; vale trocar apenas o `SECRET_KEY` por um valor aleatório.
 
 Abra `http://localhost:5000` e faça login com um usuário do LDAP (`fry` / `fry`, ...).
 
@@ -216,7 +217,7 @@ OIDC_REDIRECT_URI=https://auk.ucs.br/flask/callback
 OIDC_POST_LOGOUT_REDIRECT_URI=https://auk.ucs.br/flask/
 ```
 
-E cadastre as mesmas URLs no client `flask-lab` do Keycloak:
+Essas URLs já estão cadastradas no client via `dev-realm.json`. Se o realm for pré-existente, cadastre-as no console:
 
 - Valid redirect URIs: `https://auk.ucs.br/flask/callback` (e `https://localhost:8443/flask/callback`)
 - Valid post logout redirect URIs: `https://auk.ucs.br/flask/*` (e `https://localhost:8443/flask/*`)
@@ -314,6 +315,7 @@ docker compose exec nginx nginx -s reload
 | O segundo app Flask não sobe | os três apps usam `localhost:5000` | rode um por vez ou configure portas/redirects diferentes |
 | `/flask/` retorna `502` | app parado ou ainda com o bind antigo em `127.0.0.1:5000` | reinicie `uv run python app.py` (o código agora escuta em `0.0.0.0`) |
 | Login via `/flask/` falha com `invalid_request_uri` | URLs do subpath não cadastradas no client `flask-lab` ou `.env` ainda no perfil A | cadastre `https://auk.ucs.br/flask/callback` no Keycloak e ajuste `OIDC_REDIRECT_URI` no `.env` do cliente |
+| Keycloak não sobe com `Script upload is disabled` | client importado com `authorizationSettings` e política JS inline | remova `authorizationSettings` do client no realm JSON (autorização fina não é usada pelo lab) |
 
 ## Limpeza
 
