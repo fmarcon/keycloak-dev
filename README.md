@@ -1,38 +1,90 @@
-# Keycloak + PostgreSQL + Nginx (HTTPS) + LDAP dev
+# Laboratório Keycloak: PostgreSQL + Nginx (HTTPS) + LDAP
 
-Stack: Keycloak 26 atras de nginx com TLS, persistencia em PostgreSQL 16, user federation LDAP (OpenLDAP de testes) no realm `dev`.
+Este é um ambiente local e reproduzível para estudar Keycloak, federação de usuários via LDAP e OpenID Connect. A proposta **não** é ser uma configuração de produção: tudo aqui foi simplificado para você experimentar, quebrar e recompor sem medo.
 
-Imagens: `quay.io/keycloak/keycloak:26.0`, `postgres:16-alpine`, `nginx:1.27-alpine`, `keycloak-dev-openldap` (imagem local em `ldap/`, baseada no [rroemhild/docker-test-openldap](https://github.com/rroemhild/docker-test-openldap), MIT), `osixia/phpldapadmin:latest`.
+A stack sobe com Docker Compose. O Keycloak fica atrás de um nginx com TLS, guarda seus dados em PostgreSQL e federa os usuários de um OpenLDAP de testes (com dados fictícios do Futurama). Para estudar o protocolo, há também três clients Flask em Python que implementam o fluxo *Authorization Code* de formas diferentes.
 
-## Arquivos
+> **Aviso:** senhas, certificados e dados deste laboratório são públicos e fictícios. Não os reutilize em produção.
 
-| Arquivo | Funcao |
+## Sumário
+
+- [Visão geral](#visão-geral)
+- [Estrutura do projeto](#estrutura-do-projeto)
+- [Primeiros passos](#primeiros-passos)
+- [Como o TLS funciona](#como-o-tls-funciona)
+- [Federação LDAP no realm `dev`](#federação-ldap-no-realm-dev)
+- [Laboratório Flask + OpenID Connect](#laboratório-flask--openid-connect)
+- [Certificados](#certificados)
+- [Detalhes importantes](#detalhes-importantes)
+- [Problemas comuns](#problemas-comuns)
+- [Limpeza](#limpeza)
+
+## Visão geral
+
+```
+browser --HTTPS--> nginx --HTTP--> keycloak:8080 --JDBC--> postgres:5432
+                     |                  |
+                     |                  +--LDAP--> openldap:10389
+                     +--HTTP--> phpldapadmin:80 (subpath /phpldapadmin)
+```
+
+O TLS termina no nginx; o tráfego entre nginx e Keycloak é HTTP simples na rede interna. O realm `dev` é importado automaticamente na primeira inicialização e já vem com o provedor de federação LDAP configurado.
+
+### Imagens utilizadas
+
+| Componente | Imagem / versão |
 |---|---|
-| `docker-compose.yml` | servicos postgres, keycloak, openldap, phpldapadmin, nginx |
-| `nginx/default.conf.template` | reverse proxy HTTPS + redirect HTTP, processado por envsubst |
-| `nginx/certs/` | certificados (`fullchain.pem`, `privkey.pem`) |
-| `nginx/certs/generate-dev-cert.sh` | gera certificado self-signed de dev |
-| `nginx/phpldapadmin-http.conf` | VirtualHost do Apache do phpLDAPadmin com `Alias /phpldapadmin` (subpath) |
-| `keycloak/realms/dev-realm.json` | realm `dev` com user federation LDAP (import no startup) |
-| `ldap/` | imagem Docker do OpenLDAP de dev (Dockerfile, entrypoint com seed unico, LDIFs de dados) |
-| `.env.example` | variaveis de ambiente |
+| Keycloak | `quay.io/keycloak/keycloak:26.0` |
+| PostgreSQL | `postgres:16-alpine` |
+| nginx | `nginx:1.27-alpine` |
+| OpenLDAP | `keycloak-dev-openldap:latest` (imagem local em `ldap/`, baseada no [rroemhild/docker-test-openldap](https://github.com/rroemhild/docker-test-openldap), MIT) |
+| phpLDAPadmin | `osixia/phpldapadmin:latest` |
 
-## Uso
+### Serviços e portas
 
-Copie e edite o `.env`:
+| Serviço | IP interno | Porta no host | Função |
+|---|---|---|---|
+| postgres | `172.28.0.10` | — | banco do Keycloak |
+| keycloak | `172.28.0.20` | — | health interno na porta 9000 |
+| nginx | `172.28.0.30` | `NGINX_HTTP_PORT` (80) e `NGINX_HTTPS_PORT` (443) | proxy HTTPS |
+| openldap | `172.28.0.40` | `LDAP_PORT` (10389) e `LDAPS_PORT` (10636) | diretório de testes |
+| phpldapadmin | `172.28.0.50` | `PHPLDAPADMIN_PORT` (8081) | interface web para o LDAP |
+
+### Pré-requisitos
+
+- Docker e Docker Compose.
+- Para os clients Flask: Python >= 3.12 e [uv](https://docs.astral.sh/uv/).
+
+## Estrutura do projeto
+
+| Arquivo | Função |
+|---|---|
+| `docker-compose.yml` | define os serviços postgres, keycloak, openldap, phpldapadmin e nginx |
+| `.env.example` | variáveis de ambiente do stack (copie para `.env`) |
+| `nginx/default.conf.template` | reverse proxy HTTPS + redirecionamento HTTP, processado por `envsubst` |
+| `nginx/certs/` | certificados `fullchain.pem` e `privkey.pem` |
+| `nginx/certs/generate-dev-cert.sh` | gera o certificado self-signed de dev |
+| `nginx/phpldapadmin-http.conf` | VirtualHost do Apache com `Alias /phpldapadmin` (subpath) |
+| `keycloak/realms/dev-realm.json` | realm `dev` com federação LDAP (importado no startup) |
+| `ldap/` | imagem Docker do OpenLDAP de dev (Dockerfile, entrypoint com seed único e LDIFs) |
+| `flask-oidc-client/` | os três clients OIDC de exemplo |
+
+## Primeiros passos
+
+Copie o arquivo de exemplo e ajuste as senhas:
 
 ```bash
 cp .env.example .env
-# edite senhas fortes (POSTGRES_PASSWORD, KC_ADMIN_PASSWORD)
+# edite o .env com senhas fortes (POSTGRES_PASSWORD, KC_ADMIN_PASSWORD)
 ```
 
-O hostname padrao e `auk.ucs.br`; aponte-o no `/etc/hosts` do host:
+O hostname padrão é `auk.ucs.br`. Aponte-o no `/etc/hosts` da sua máquina:
 
 ```bash
 echo "127.0.1.1 auk.ucs.br" | sudo tee -a /etc/hosts
 ```
 
-Gere o certificado self-signed de dev e suba:
+Gere o certificado self-signed e suba o stack:
 
 ```bash
 ./nginx/certs/generate-dev-cert.sh
@@ -40,15 +92,13 @@ docker compose up -d
 docker compose logs -f keycloak
 ```
 
-Acesse `https://auk.ucs.br` (porta 443 por padrao). Certificado self-signed gera aviso no browser (aceite em dev). Login admin: `KC_ADMIN_USER`/`KC_ADMIN_PASSWORD` do `.env` (`admin`/`admin` por padrao, troque).
+Agora é só acessar **https://auk.ucs.br** (porta 443). O certificado é self-signed, então o navegador vai avisar — aceite o risco, já que é um ambiente de dev. O login da console admin usa `KC_ADMIN_USER` / `KC_ADMIN_PASSWORD` do `.env` (`admin` / `admin` por padrão; troque!).
 
-No primeiro boot o Keycloak importa o realm `dev` com federation LDAP (veja secao abaixo): usuarios do LDAP logam com senha = uid (`fry`, `leela`, ...), sem cadastro no Keycloak.
+No primeiro boot, o Keycloak importa o realm `dev` já com a federação LDAP: os usuários do LDAP entram com senha igual ao `uid` (`fry`, `leela`, ...), sem precisar de cadastro no Keycloak. O endereço `http://auk.ucs.br` (porta 80) redireciona com 301 para HTTPS.
 
-`http://auk.ucs.br` (porta 80) redireciona 301 para HTTPS.
+### Variação: localhost com portas altas
 
-### Variacao dev em localhost com portas altas
-
-Sem `/etc/hosts` e sem portas privilegiadas, ajuste o `.env`:
+Se você não quer mexer no `/etc/hosts` nem usar portas privilegiadas, ajuste o `.env`:
 
 ```dotenv
 KC_HOSTNAME=https://localhost:8443
@@ -56,37 +106,37 @@ NGINX_HTTP_PORT=8080
 NGINX_HTTPS_PORT=8443
 ```
 
-Acesse `https://localhost:8443` (o redirect HTTP chega em `http://localhost:8080`). O certificado self-signed ja cobre `localhost` e `127.0.0.1` (SAN). Nesta variacao, as URLs das secoes abaixo trocam `auk.ucs.br` por `localhost:8443` (ex.: o teste de login LDAP).
+Acesse **https://localhost:8443** (o redirecionamento HTTP chega em `http://localhost:8080`). O certificado gerado já cobre `localhost` e `127.0.0.1` via SAN. Nas seções abaixo, troque `auk.ucs.br` por `localhost:8443` nas URLs (por exemplo, no teste de token LDAP).
 
 ## Como o TLS funciona
 
-- TLS termina no nginx. Nginx fala HTTP simples com Keycloak na rede interna.
-- `KC_HOSTNAME` deve ser a URL publica HTTPS vista pelo browser (`https://auk.ucs.br` por padrao; `https://localhost:8443` na variacao dev).
-- `KC_PROXY_HEADERS=xforwarded` faz o Keycloak confiar em `X-Forwarded-Proto`/`Host`/`For`. Sem isso, issuer e redirects saem como `http`.
-- `KC_HTTP_ENABLED=true` e necessario porque o trafego interno e HTTP.
+- O TLS termina no nginx; dentro da rede, nginx fala HTTP simples com o Keycloak.
+- `KC_HOSTNAME` deve ser a URL HTTPS pública vista pelo navegador (`https://auk.ucs.br` por padrão, `https://localhost:8443` na variação dev).
+- `KC_PROXY_HEADERS=xforwarded` faz o Keycloak confiar em `X-Forwarded-Proto`, `X-Forwarded-Host` e `X-Forwarded-For`. Sem isso, o issuer e os redirects saem com `http`.
+- `KC_HTTP_ENABLED=true` é necessário porque o tráfego interno é HTTP.
 
-## User federation LDAP (dev)
+## Federação LDAP no realm `dev`
 
-O compose sobe um OpenLDAP de dev (imagem construida de `ldap/`, com dados fake da Planet Express do Futurama — LDIFs herdados do [rroemhild/docker-test-openldap](https://github.com/rroemhild/docker-test-openldap), MIT), junto com phpLDAPadmin para navegar/editar.
+O Compose sobe um OpenLDAP de dev (imagem construída a partir de `ldap/`, com os LDIFs fictícios da Planet Express herdados do projeto rroemhild, MIT) junto com o phpLDAPadmin para navegar e editar os dados.
 
-- Realm `dev` importado automaticamente no startup do Keycloak (`--import-realm` + `keycloak/realms/dev-realm.json`) ja com o federation provider LDAP configurado.
-- LDAP interno em `openldap:10389` (sem porta no host). Bind: `cn=admin,dc=planetexpress,dc=com` / `GoodNewsEveryone`.
+- O realm `dev` é importado automaticamente no startup (`--import-realm` + `keycloak/realms/dev-realm.json`) já com o provedor LDAP configurado.
+- O LDAP responde em `openldap:10389` na rede interna e também nas portas `10389`/`10636` do host. Bind: `cn=admin,dc=planetexpress,dc=com` / `GoodNewsEveryone`.
 - phpLDAPadmin (mesmo login admin do LDAP):
   - Pelo nginx (recomendado): `https://auk.ucs.br/phpldapadmin` (ou `https://localhost/phpldapadmin`).
-  - Acesso direto dev: `http://localhost:${PHPLDAPADMIN_PORT}` (8081 por padrao).
-- O phpLDAPadmin roda em subpath `/phpldapadmin`: o nginx faz proxy pass-through (`location /phpldapadmin/` -> `phpldapadmin:80` sem reescrita de URI) e o Apache do container serve nesse path via `Alias` definido em `nginx/phpldapadmin-http.conf`. O phpLDAPadmin gera links a partir do `SCRIPT_NAME`, entao o prefixo chega intacto a aplicacao.
-- `PHPLDAPADMIN_LDAP_HOSTS` no compose precisa do prefixo `#PYTHON2BASH:` (convencao interna da imagem osixia) para o valor `[{'openldap': [...]}]` ser parseado como estrutura e virar PHP valido no `config.php`; sem o prefixo a string vira literal e o site quebra com `Parse error`.
-- O `config.php` gerado persiste no volume nomeado `keycloak_phpldapadmin_data` (montado em `/var/www/phpldapadmin`); sem ele a imagem cria volume anonimo e o config antigo sobrevive a recriacao do container.
-- Mapeamento: `uid` -> username, `givenName`/`sn`/`mail` -> firstName/lastName/email, RDN `cn`, UUID `entryUUID`, grupos via `memberOf` (mode IMPORT: grupos LDAP viram grupos do Keycloak no primeiro login).
-- `editMode` READ_ONLY: senha valida via bind no LDAP; perfis nao sao editaveis pelo Keycloak.
+  - Acesso direto de dev: `http://localhost:${PHPLDAPADMIN_PORT}` (8081 por padrão).
+- O phpLDAPadmin roda no subpath `/phpldapadmin`: o nginx faz proxy pass-through (`location /phpldapadmin/` → `phpldapadmin:80`, sem reescrever a URI) e o Apache do container serve nesse caminho via `Alias`, definido em `nginx/phpldapadmin-http.conf`. Como a aplicação monta os links a partir de `SCRIPT_NAME`, o prefixo chega intacto.
+- `PHPLDAPADMIN_LDAP_HOSTS` no Compose precisa do prefixo `#PYTHON2BASH:` (convenção interna da imagem osixia) para que o valor `[{'openldap': [...]}]` seja interpretado como estrutura e vire PHP válido no `config.php`. Sem o prefixo, a string fica literal e o site quebra com `Parse error`.
+- O `config.php` gerado persiste no volume nomeado `keycloak_phpldapadmin_data` (montado em `/var/www/phpldapadmin`); sem ele, a imagem cria um volume anônimo e uma configuração antiga sobrevive à recriação do container.
+- Mapeamento de atributos: `uid` → username, `givenName`/`sn`/`mail` → firstName/lastName/email, RDN `cn`, UUID `entryUUID` e grupos via `memberOf`. No modo `IMPORT`, os grupos LDAP viram grupos do Keycloak no primeiro login.
+- `editMode` é `READ_ONLY`: a senha é validada por bind no LDAP e os perfis não podem ser editados pelo Keycloak.
 
-### Dados do LDAP (dev)
+### Usuários e grupos de teste
 
-Bind admin: DN `cn=admin,dc=planetexpress,dc=com`, senha `GoodNewsEveryone`. Base dos usuarios: `ou=people,dc=planetexpress,dc=com`.
+Bind admin: DN `cn=admin,dc=planetexpress,dc=com`, senha `GoodNewsEveryone`. Base dos usuários: `ou=people,dc=planetexpress,dc=com`.
 
-Usuarios (login = `uid`, senha = uid):
+Login = `uid`, senha = `uid`:
 
-| Login (uid) | Senha | Nome (cn) | Email | Grupos |
+| Login (`uid`) | Senha | Nome (`cn`) | Email | Grupos |
 |---|---|---|---|---|
 | `fry` | `fry` | Philip J. Fry | fry@planetexpress.com | `ship_crew` |
 | `leela` | `leela` | Turanga Leela | leela@planetexpress.com | `ship_crew` |
@@ -94,145 +144,158 @@ Usuarios (login = `uid`, senha = uid):
 | `professor` | `professor` | Hubert J. Farnsworth | professor@planetexpress.com | `admin_staff` |
 | `hermes` | `hermes` | Hermes Conrad | hermes@planetexpress.com | `admin_staff` |
 | `zoidberg` | `zoidberg` | John A. Zoidberg | zoidberg@planetexpress.com | — |
-| `amy` | `amy` | Amy Wong (sn: Kroker) | amy@planetexpress.com | — |
+| `amy` | `amy` | Amy Wong (`sn`: Kroker) | amy@planetexpress.com | — |
 
-Grupos (`objectClass: Group`, na mesma OU dos usuarios, membros por DN em `member`, overlay `memberOf` ativo):
+Grupos (`objectClass: Group`, na mesma OU dos usuários, membros por DN em `member`, com o overlay `memberOf` ativo):
 
 | Grupo | Membros |
 |---|---|
 | `ship_crew` | fry, leela, bender |
 | `admin_staff` | professor, hermes |
 
-Notas:
+Algumas curiosidades:
 
-- DN do `amy` e multi-valorado (`cn=Amy Wong+sn=Kroker`), peculiaridade do RDN; login/email funcionam normal.
-- `professor` tem dois mails no LDAP (`professor@` e `hubert@`); o mapper importa o primeiro.
-- Senhas em texto no LDAP (dev fake); nunca use em producao.
+- O DN de `amy` é multi-valorado (`cn=Amy Wong+sn=Kroker`), uma peculiaridade do RDN; login e email funcionam normalmente.
+- `professor` tem dois emails no LDAP (`professor@` e `hubert@`); o mapper importa o primeiro.
+- As senhas estão em texto puro no LDAP (são dados falsos de dev). Nunca faça isso em produção.
 
-Teste rapido (token com senha do LDAP):
+Teste rápido — pegar um token usando a senha do LDAP:
 
 ```bash
 curl -k -X POST https://auk.ucs.br/realms/dev/protocol/openid-connect/token \
   -d "grant_type=password&client_id=admin-cli&username=fry&password=fry&scope=openid"
 ```
 
-### Persistencia e re-seed do LDAP
+### Persistência e re-seed do LDAP
 
-- Dados do LDAP persistem nos volumes nomeados `keycloak_openldap_data` (banco) e `keycloak_openldap_config` (slapd.d). Restart, `down`+`up` e recreate mantem os dados e os `entryUUID`s — edicoes via phpLDAPadmin sobrevivem.
-- O seed (schema, overlays, dados Futurama) roda UMA vez, no primeiro boot com volumes vazios, controlado pelo marker `/var/lib/ldap/.seeded`.
-- Para re-semeiar do zero: `LDAP_RESEED=1 docker compose up -d openldap` (apaga banco e config do LDAP). Os `entryUUID`s mudam; usuarios ja importados no Keycloak ficam com federation link stale e o login falha (401). Para corrigir: apague o realm `dev` no console admin e reinicie o keycloak (realm reimportado do zero), ou `docker compose down -v` (apaga o Postgres junto).
-- Import do realm so roda se o realm `dev` nao existir. Para reimportar do zero: apague o realm no console admin e reinicie o keycloak (ou `docker compose down -v`, que apaga tudo).
-- Trocar `LDAP_DOMAIN` exige editar os LDIFs em `ldap/bootstrap/` (DNs hardcoded).
+- Os dados do LDAP ficam nos volumes nomeados `keycloak_openldap_data` (banco) e `keycloak_openldap_config` (`slapd.d`). Um restart, um `down` + `up` ou a recriação dos containers preserva os dados e os `entryUUID`s — inclusive edições feitas pelo phpLDAPadmin.
+- O seed (schema, overlays e dados do Futurama) roda **uma única vez**, no primeiro boot com os volumes vazios, controlado pelo marcador `/var/lib/ldap/.seeded`.
+- Para semear do zero: `LDAP_RESEED=1 docker compose up -d openldap` (apaga banco e config do LDAP). Os `entryUUID`s mudam, e os usuários já importados no Keycloak ficam com o link de federação inválido — o login falha com 401. Para corrigir, apague o realm `dev` no console admin e reinicie o Keycloak (o realm é reimportado), ou use `docker compose down -v` (que também apaga o PostgreSQL).
+- O import do realm só acontece se o realm `dev` não existir. Para reimportar do zero, apague o realm no console e reinicie o Keycloak, ou use `docker compose down -v`.
+- Trocar `LDAP_DOMAIN` exige editar os LDIFs em `ldap/bootstrap/`, onde os DNs estão escritos de forma fixa.
 
-## Laboratorio Flask + OpenID Connect (client)
+## Laboratório Flask + OpenID Connect
 
-Um client OIDC de exemplo em Flask (`flask-oidc-client/`), rodando no host com `uv`, autenticando contra o realm `dev` desta stack. Usa o fluxo **Authorization Code** com client **confidential**, implementado na mao (`requests` + PyJWT) para aprender o protocolo.
+Em `flask-oidc-client/` há três clients de exemplo que rodam no host com `uv` e autenticam contra o realm `dev`. Todos usam o fluxo **Authorization Code** com client **confidential**, e todos escutam na porta **5000** — portanto, rode **um de cada vez**.
 
-### Configurar o client no Keycloak
+### 1. Configurar o client no Keycloak
 
-Console admin `https://auk.ucs.br/admin` (realm `dev`) -> **Clients -> Create client**:
+No console admin (`https://auk.ucs.br/admin`, realm `dev`), vá em **Clients → Create client**:
 
 - Client ID: `flask-lab`, Client type: **Confidential**
-- Capability config: manter defaults (Standard flow = Authorization Code)
+- Capability config: manter os defaults (Standard flow = Authorization Code)
 - Valid redirect URIs: `http://localhost:5000/callback`
 - Valid post logout redirect URIs: `http://localhost:5000/*`
-- Criar; aba **Credentials** -> copiar o client secret
+- Após criar, abra a aba **Credentials** e copie o client secret.
 
-### Rodar
+### 2. Rodar
 
 ```bash
 cd flask-oidc-client
-cp .env.example .env        # PASSO OBRIGATORIO
-# edite o .env: OIDC_CLIENT_SECRET (+ troque SECRET_KEY)
+cp .env.example .env        # passo obrigatório
+# edite o .env: cole o OIDC_CLIENT_SECRET e troque o SECRET_KEY
 uv sync
 uv run python app.py
 ```
 
-Sem `.env`, o app nao sobe e aponta o erro pedindo o secret (todas as outras variaveis tem default alinhado ao stack). A **unica variavel obrigatoria e `OIDC_CLIENT_SECRET`** (aba Credentials do client no Keycloak).
+Sem o `.env`, o app não sobe e avisa que falta o secret. Todas as outras variáveis já vêm com valores alinhados ao stack — **a única obrigatória é `OIDC_CLIENT_SECRET`** (aba Credentials do client no Keycloak).
 
-Abra `http://localhost:5000` e faca login com usuario do LDAP (`fry`/`fry`, ...).
+Abra `http://localhost:5000` e faça login com um usuário do LDAP (`fry` / `fry`, ...).
 
-### Variaveis de ambiente
+### Variáveis de ambiente
 
-| Variavel | Default | Obrigatoria | Funcao |
+| Variável | Default | Obrigatória | Função |
 |---|---|---|---|
-| `OIDC_ISSUER_URL` | `https://auk.ucs.br/realms/dev` | nao | issuer do realm; endpoints descobertos via `.well-known` |
-| `OIDC_CLIENT_ID` | `flask-lab` | nao | client criado no Keycloak |
+| `OIDC_ISSUER_URL` | `https://auk.ucs.br/realms/dev` | não | issuer do realm; endpoints descobertos via `.well-known` |
+| `OIDC_CLIENT_ID` | `flask-lab` | não | client criado no Keycloak |
 | `OIDC_CLIENT_SECRET` | — | **sim** | segredo do client (aba Credentials no console admin) |
-| `OIDC_REDIRECT_URI` | `http://localhost:5000/callback` | nao | deve bater com "Valid redirect URIs" do client |
-| `OIDC_POST_LOGOUT_REDIRECT_URI` | `http://localhost:5000/` | nao | deve bater com "Valid post logout redirect URIs" do client |
-| `OIDC_CLIENT_AUTH_METHOD` | `post` | nao | como o client se autentica no token endpoint: `post` (secret no body) ou `basic` (HTTP Basic) |
-| `OIDC_CA_BUNDLE` | `nginx/certs/fullchain.pem` | nao | CA self-signed do Keycloak de dev (apague a linha para usar a CA do sistema) |
-| `SECRET_KEY` | gerada a cada boot | nao (recomendada fixa) | assina o cookie de sessao do Flask; sem valor fixo, o login cai a cada restart |
+| `OIDC_REDIRECT_URI` | `http://localhost:5000/callback` | não | deve bater com "Valid redirect URIs" do client |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | `http://localhost:5000/` | não | deve bater com "Valid post logout redirect URIs" do client |
+| `OIDC_CLIENT_AUTH_METHOD` | `post` | não | como o client se autentica no token endpoint: `post` (secret no body) ou `basic` (HTTP Basic) |
+| `OIDC_CA_BUNDLE` | `../nginx/certs/fullchain.pem` | não | CA self-signed do Keycloak de dev (apague a linha para usar a CA do sistema) |
+| `SECRET_KEY` | gerada a cada boot | não (recomendada fixa) | assina o cookie de sessão do Flask; sem valor fixo, o login cai a cada restart |
 
-### O que o laboratorio mostra
+### O que o laboratório mostra
 
 | Rota | Aprendizado |
 |---|---|
-| `/auth` | monta a URL de autorizacao (`state` + `nonce`) e redireciona |
+| `/auth` | monta a URL de autorização (`state` + `nonce`) e redireciona |
 | `/callback` | troca o `code` por tokens e valida o ID token via JWKS (`iss`, `aud`, `exp`, `nonce`) |
 | `/me` | userinfo (endpoint protegido) + claims do ID token + payload do access token |
-| `/logout` | `end_session_endpoint` no Keycloak + limpa a sessao |
+| `/logout` | chama o `end_session_endpoint` no Keycloak e limpa a sessão |
 
-Notas:
+Os endpoints são descobertos em tempo de execução via `/.well-known/openid-configuration` — nada fica hardcoded. Como o Keycloak de dev usa certificado self-signed, o app aponta `OIDC_CA_BUNDLE` para o certificado do nginx (nunca usa `verify=False`); com um certificado válido, basta apagar a linha do `.env`.
 
-- Os endpoints sao descobertos em runtime via `/.well-known/openid-configuration` (nada hardcoded).
-- TLS: o Keycloak de dev usa cert self-signed; por padrao o app usa `OIDC_CA_BUNDLE = nginx/certs/fullchain.pem` como CA (sem `verify=False`). Com cert valido, apague a linha do `.env`.
-- A sessao do Flask e um cookie assinado (limite ~4 KB); com tokens grandes, troque por sessao server-side (ex.: Redis).
-- Client com secret enviado via body (`OIDC_CLIENT_AUTH_METHOD=post`, padrao do Keycloak) ou HTTP Basic (`basic`).
-- Proximos passos sugeridos: refresh token, PKCE (client public), claims de roles/groups no token.
+### As três implementações
 
-### Versao Authlib (alto nivel)
+| Etapa | `app.py` (manual) | `app_authlib.py` (Authlib) | `app_python_keycloak.py` (python-keycloak) |
+|---|---|---|---|
+| Descoberta | `OidcClient.discover()` + cache do `.well-known` | `server_metadata_url` | `KeycloakOpenID` (implícita) |
+| URL de auth | `build_authorization_url()` | `authorize_redirect()` | `kc.auth_url()` |
+| Code → token | `exchange_code()` | `authorize_access_token()` | `kc.token()` |
+| Validação do ID token | JWKS + `iss`/`aud`/`exp`/`nonce` | interna da lib (inclui nonce) | `kc.decode_token(validate=True)`; nonce não conferido no app |
+| userinfo | `GET` com Bearer | `userinfo()` | `kc.userinfo()` |
+| Logout | `end_session_endpoint` + `id_token_hint` | `end_session_endpoint` direto | backchannel com refresh token |
 
-Mesmo laboratorio em `app_authlib.py`, mas usando a biblioteca **Authlib** (integracao Flask p/ OAuth/OIDC) em vez de implementar o fluxo na mao. Roda em **`http://localhost:5000`** para conviver com o `app.py` (porta 5000).
+Para rodar as versões com biblioteca:
 
 ```bash
-uv run python app_authlib.py     # porta 5000
+uv run python app_authlib.py          # Authlib
+uv run python app_python_keycloak.py  # python-keycloak
 ```
 
-O que a lib abstrai em relacao ao `app.py`:
+O `.env` é único e as três usam a mesma porta (5000), então escolha um app por vez. Se quiser rodar mais de um simultaneamente, dê portas diferentes a cada um (e ajuste `OIDC_REDIRECT_URI`, `OIDC_POST_LOGOUT_REDIRECT_URI` e os redirects cadastrados no client do Keycloak).
 
-| Passo | `app.py` (manual) | `app_authlib.py` (Authlib) |
-|---|---|---|
-| Descoberta | `discover()` + cache do `.well-known` | `server_metadata_url` no `oauth.register` |
-| URL de auth | monta `state`+`nonce` manual | `authorize_redirect()` (guarda na sessao) |
-| Troca code por tokens | `requests.post` + secret | `authorize_access_token()` |
-| Validacao do ID token | JWKS/iss/aud/exp/nonce manual | automatica; claims em `token['userinfo']` |
-| userinfo | GET Bearer manual | `userinfo()` |
-| Logout | monta `end_session` manual | `load_server_metadata()['end_session_endpoint']` (sem helper) |
+Limitações conscientes do laboratório: o payload do access token é apenas decodificado (sem verificar assinatura) no `/me` dos três apps; a sessão é um cookie assinado do Flask (~4 KB), não server-side; não há refresh automático no `app.py` nem no `app_authlib.py`.
 
-Nota: o `.env` e unico; a porta do redirect (`5000` vs `5000`) depende de qual app roda. Troque `OIDC_REDIRECT_URI`/`OIDC_POST_LOGOUT_REDIRECT_URI` no `.env` (ou passe via env) e registre a mesma URL no client do Keycloak.
+Próximos passos sugeridos: refresh token, PKCE (client público) e exposição de roles/groups no token.
 
-## Certificado
+## Certificados
 
-Dev (self-signed):
+Para desenvolvimento (self-signed):
 
 ```bash
 ./nginx/certs/generate-dev-cert.sh
-FORCE=1 ./nginx/certs/generate-dev-cert.sh           # regenerar
-CN=outro-host.local DAYS=365 ./nginx/certs/generate-dev-cert.sh   # CN e validade custom (padrao: CN=auk.ucs.br, 825 dias)
+FORCE=1 ./nginx/certs/generate-dev-cert.sh                       # regenerar
+CN=outro-host.local DAYS=365 ./nginx/certs/generate-dev-cert.sh  # CN e validade custom
+# padrões: CN=auk.ucs.br, 825 dias
 ```
 
-Producao: substitua `nginx/certs/fullchain.pem` e `nginx/certs/privkey.pem` por certificado real (Let's Encrypt, CA interna). Monte os arquivos no mesmo path. Para Let's Encrypt, o desafio HTTP-01 funciona na porta 80 (nginx ja responde nela).
+Em produção, substitua `nginx/certs/fullchain.pem` e `nginx/certs/privkey.pem` por um certificado real (Let's Encrypt, CA interna etc.), montando os arquivos nos mesmos caminhos. Para Let's Encrypt, o desafio HTTP-01 funciona na porta 80, que o nginx já atende.
 
-Depois de trocar certificado: `docker compose exec nginx nginx -s reload`.
+Depois de trocar o certificado, recarregue o nginx:
+
+```bash
+docker compose exec nginx nginx -s reload
+```
 
 ## Detalhes importantes
 
-- `KC_HOSTNAME_STRICT=false` permite acesso por outros hosts (dev). Em producao com dominio fixo, mude para `true`.
-- Portas no host: `NGINX_HTTP_PORT` (80 interno) e `NGINX_HTTPS_PORT` (443 interno). O phpLDAPadmin ainda publica `PHPLDAPADMIN_PORT` (8081) para acesso direto de dev, alem do subpath `/phpldapadmin` no nginx.
-- Postgres nao expoe porta no host; so a rede interna `keycloak-net`.
-- Rede interna fixa em `172.28.0.0/24` (gateway `172.28.0.1`): postgres `172.28.0.10`, keycloak `172.28.0.20`, nginx `172.28.0.30`, openldap `172.28.0.40`, phpldapadmin `172.28.0.50`.
-- Dados persistem nos volumes `keycloak_postgres_data`, `keycloak_openldap_data`, `keycloak_openldap_config` e `keycloak_phpldapadmin_data` (nomes explicitos, sem prefixo do projeto).
-- Healthcheck do Keycloak usa a porta de management (9000) com `KC_HEALTH_ENABLED=true`. O nginx tambem expoe `/health` publicamente (proxy para a porta 9000). Metricas habilitadas com `KC_METRICS_ENABLED=true`.
-- O redirect HTTP usa `NGINX_HTTPS_PORT` para montar a URL; com porta 443 o sufixo e omitido.
-- HSTS esta comentado no template; habilite so com certificado valido e dominio fixo.
+- `KC_HOSTNAME_STRICT=false` permite acesso por outros hosts (dev). Em produção, com domínio fixo, mude para `true`.
+- Postgres não expõe porta no host; só é acessível pela rede interna `keycloak-net`.
+- A rede bridge usa `172.28.0.0/24` (gateway `172.28.0.1`): postgres `172.28.0.10`, keycloak `172.28.0.20`, nginx `172.28.0.30`, openldap `172.28.0.40` e phpldapadmin `172.28.0.50`.
+- Os dados persistem nos volumes `keycloak_postgres_data`, `keycloak_openldap_data`, `keycloak_openldap_config` e `keycloak_phpldapadmin_data` (nomes explícitos, sem prefixo do projeto).
+- O healthcheck do Keycloak usa a porta de management 9000 (`KC_HEALTH_ENABLED=true`); o nginx também expõe `/health` publicamente, fazendo proxy para essa porta. Métricas habilitadas com `KC_METRICS_ENABLED=true`.
+- O redirecionamento HTTP monta a URL com `NGINX_HTTPS_PORT`; quando a porta é 443, o sufixo é omitido.
+- O HSTS está comentado no template — habilite somente com certificado válido e domínio fixo.
+
+## Problemas comuns
+
+| Sintoma | Causa provável | Como resolver |
+|---|---|---|
+| Issuer e redirects saem com `http` | falta de `KC_PROXY_HEADERS=xforwarded` | mantenha a variável; o nginx envia os headers `X-Forwarded-*` |
+| Login falha com 401 após um re-seed | `LDAP_RESEED=1` muda os `entryUUID`s e o link de federação fica inválido | apague o realm `dev` no console e reinicie o Keycloak, ou use `docker compose down -v` |
+| Edição do `dev-realm.json` não surte efeito | o import só roda quando o realm não existe | apague o realm `dev` e reinicie o Keycloak, ou use `docker compose down -v` |
+| phpLDAPadmin com `Parse error` | `PHPLDAPADMIN_LDAP_HOSTS` sem o prefixo `#PYTHON2BASH:` | mantenha o prefixo |
+| phpLDAPadmin volta com configuração antiga | `config.php` gerado em volume anônimo | mantenha `keycloak_phpldapadmin_data` montado em `/var/www/phpldapadmin` |
+| Client Flask falha TLS contra o Keycloak | certificado self-signed | use `OIDC_CA_BUNDLE=../nginx/certs/fullchain.pem` (nunca `verify=False`) |
+| O segundo app Flask não sobe | os três apps usam `localhost:5000` | rode um por vez ou configure portas/redirects diferentes |
 
 ## Limpeza
 
 ```bash
-docker compose down          # para os containers (dados do LDAP e do banco persistem)
-docker compose down -v       # para e apaga os volumes: banco, realm, usuarios, LDAP e config do phpLDAPadmin
+docker compose down          # para os containers; dados do LDAP e do banco persistem
+docker compose down -v       # para e apaga os volumes: banco, realm, usuários, LDAP e config do phpLDAPadmin
 ```
 
-Apos `down`+`up` o LDAP mantem os `entryUUID`s e os imports do Keycloak continuam validos — nada a fazer. Se o LDAP foi re-semeado com o banco preservado (`LDAP_RESEED=1` ou remocao manual apenas dos volumes `keycloak_openldap_*`), apague o realm `dev` no console admin e reinicie o keycloak para reimportar.
+Depois de um `down` + `up`, o LDAP mantém os `entryUUID`s e os imports do Keycloak continuam válidos — não há nada a fazer. Se o LDAP foi re-semeado com o banco preservado (`LDAP_RESEED=1` ou remoção manual apenas dos volumes `keycloak_openldap_*`), apague o realm `dev` no console admin e reinicie o Keycloak para reimportá-lo.
