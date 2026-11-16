@@ -30,7 +30,7 @@ Idioma do projeto: português do Brasil em README, comentários, docstrings e me
 | `.env` | valores locais reais, **não versionado** |
 | `README.md` | documentação de uso do stack |
 | `AGENTS.md` | este arquivo: contexto + memória do projeto |
-| `nginx/default.conf.template` | reverse proxy HTTPS, redirect HTTP, `/health`, `/phpldapadmin`; processado por envsubst |
+| `nginx/default.conf.template` | reverse proxy HTTPS, redirect HTTP, `/health`, `/phpldapadmin/` e `/flask/`; processado por envsubst |
 | `nginx/phpldapadmin-http.conf` | VirtualHost do Apache com `Alias /phpldapadmin` |
 | `nginx/certs/generate-dev-cert.sh` | gera certificado self-signed de dev |
 | `nginx/certs/fullchain.pem`, `privkey.pem` | certificado de dev, **não versionados** |
@@ -56,7 +56,9 @@ Arquivos ignorados no git: `.env`, `flask-oidc-client/.env`, `.venv/`, `__pycach
 browser --HTTPS--> nginx --HTTP--> keycloak:8080 --JDBC--> postgres:5432
                      |                  |
                      |                  +--LDAP--> openldap:10389
+                     |
                      +--HTTP--> phpldapadmin:80 (subpath /phpldapadmin)
+                     +--/flask/--> host.docker.internal:5000 (app.py no host)
 ```
 
 TLS termina no nginx. O tráfego nginx → Keycloak é HTTP simples; `KC_PROXY_HEADERS=xforwarded` garante issuer e redirects em `https`.
@@ -104,9 +106,12 @@ uv run python app.py                # fluxo manual
 uv run python app_authlib.py        # Authlib
 uv run python app_python_keycloak.py  # python-keycloak
 uv run ruff check
+
+# acesso pelo nginx (app.py rodando no host): https://auk.ucs.br/flask/
+# trocar OIDC_REDIRECT_URI/OIDC_POST_LOGOUT_REDIRECT_URI no .env e reiniciar o app
 ```
 
-Client `flask-lab` precisa existir no Keycloak (realm `dev`, Confidential, redirect `http://localhost:5000/callback`, post logout `http://localhost:5000/*`).
+Client `flask-lab` precisa existir no Keycloak (realm `dev`, Confidential). Redirects: `http://localhost:5000/callback` (acesso direto) e `https://auk.ucs.br/flask/callback` (nginx); post logout: `http://localhost:5000/*` e `https://auk.ucs.br/flask/*`.
 
 ## Credenciais de dev
 
@@ -144,12 +149,14 @@ Tudo acima é fake e público no README. Nunca reutilizar em produção.
 | phpLDAPadmin volta com config antiga | config gerado em volume anônimo | manter `keycloak_phpldapadmin_data` montado em `/var/www/phpldapadmin` |
 | Flask falha TLS contra o Keycloak | cert self-signed | `OIDC_CA_BUNDLE=../nginx/certs/fullchain.pem` (nunca `verify=False`) |
 | segundo app Flask não sobe | todos usam `localhost:5000` | rodar um por vez ou sobrescrever porta/redirect no `.env` |
+| `/flask/` retorna 502 | app parado ou ainda escutando em `127.0.0.1:5000` | reiniciar `uv run python app.py`; o código agora escuta em `0.0.0.0` |
+| login via `/flask/` falha com `invalid_request_uri` | URLs do subpath não cadastradas no client `flask-lab` ou `.env` no perfil errado | cadastrar `https://auk.ucs.br/flask/callback` no Keycloak e ajustar `OIDC_REDIRECT_URI` |
 | LDAP não sobe com domínio novo | DNs `dc=planetexpress,dc=com` hardcoded nos LDIFs e no bind | editar `ldap/bootstrap/data/*.ldif`, `Dockerfile` e `dev-realm.json` juntos |
 | redirect HTTP errado em porta alta | nginx monta a URL com `NGINX_HTTPS_PORT` | manter a variável igual à porta publicada |
 
 ## Estado atual do lab
 
-Três implementações do mesmo fluxo Authorization Code + client confidential:
+Três implementações do mesmo fluxo Authorization Code + client confidential. O `app.py` pode ser acessado diretamente em `http://localhost:5000` ou pelo nginx em `https://auk.ucs.br/flask/`; nesse modo o `ProxyFix` usa `X-Forwarded-Prefix: /flask` para manter `url_for()` dentro do subpath.
 
 | Etapa | `app.py` (manual) | `app_authlib.py` | `app_python_keycloak.py` |
 |---|---|---|---|
@@ -171,23 +178,19 @@ Limitações conscientes: o payload do access token é apenas decodificado (sem 
 - **TLS somente no nginx**: simplifica Keycloak e mantém a rede interna em HTTP; exige `KC_PROXY_HEADERS` e `KC_HTTP_ENABLED`.
 - **Três clients Flask em vez de um**: o objetivo é comparar implementação manual, Authlib e python-keycloak. Duplicação de config no app python-keycloak é intencional para manter a comparação legível.
 - **Senha do LDAP = uid e dados fake**: reduz atrito didático; aceitável apenas porque o ambiente é local.
+- **Flask servido pelo nginx em `/flask/`**: o app roda no host e o nginx o alcança via `host.docker.internal` (`extra_hosts: host-gateway` no Compose). Exige bind em `0.0.0.0` e `ProxyFix` para `X-Forwarded-Prefix`; o acesso direto em `localhost:5000` continua valendo. Trade-off: dev server exposto na rede local e `ProxyFix` confia nos headers `X-Forwarded-*`.
 
 ### Backlog / próximos passos
 
-- Documentar `app_python_keycloak.py` no README.
 - Resolver conflito de porta 5000 entre os três apps (porta própria por app).
 - Adicionar refresh token ao `app.py` e ao `app_authlib.py`.
 - Testar PKCE com client público.
 - Expor roles/groups do Keycloak no token e exibir no `/me`.
 - Avaliar sessão server-side (Redis) para tokens grandes.
 - Adicionar healthcheck/verificação automatizada dos clients Flask.
-- Limpar resíduos históricos de porta nos comentários do `.env.example` do cliente.
 
 ### Lacunas conhecidas
 
-- README não tem seção para o client `python-keycloak`.
-- README afirma que `app_authlib.py` roda em 5000 "para conviver com `app.py` (porta 5000)" — os apps não convivem na mesma porta.
-- `flask-oidc-client/.env.example` repete "5000 p/ app.py, 5000 p/ app_authlib.py".
 - Não há testes automatizados no stack nem nos clients.
 
 ## Regras para agentes

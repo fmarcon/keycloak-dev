@@ -81,4 +81,23 @@ server {
         proxy_pass http://phpldapadmin_backend;
         proxy_set_header X-Forwarded-Prefix /phpldapadmin;
     }
+
+    # Client Flask de dev, executado no host com: uv run python app.py
+    # O container alcanca o host via host.docker.internal (extra_hosts no compose).
+    # A barra final em proxy_pass remove o prefixo /flask/ antes de encaminhar.
+    location = /flask {
+        return 301 /flask/;
+    }
+    location /flask/ {
+        proxy_pass http://host.docker.internal:5000/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header X-Forwarded-Prefix /flask;
+    }
 }

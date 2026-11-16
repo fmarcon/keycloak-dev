@@ -14,6 +14,7 @@ A stack sobe com Docker Compose. O Keycloak fica atrás de um nginx com TLS, gua
 - [Como o TLS funciona](#como-o-tls-funciona)
 - [Federação LDAP no realm `dev`](#federação-ldap-no-realm-dev)
 - [Laboratório Flask + OpenID Connect](#laboratório-flask--openid-connect)
+  - [Acessando pelo nginx](#acessando-pelo-nginx)
 - [Certificados](#certificados)
 - [Detalhes importantes](#detalhes-importantes)
 - [Problemas comuns](#problemas-comuns)
@@ -25,7 +26,9 @@ A stack sobe com Docker Compose. O Keycloak fica atrás de um nginx com TLS, gua
 browser --HTTPS--> nginx --HTTP--> keycloak:8080 --JDBC--> postgres:5432
                      |                  |
                      |                  +--LDAP--> openldap:10389
+                     |
                      +--HTTP--> phpldapadmin:80 (subpath /phpldapadmin)
+                     +--/flask/--> host.docker.internal:5000 (app.py no host)
 ```
 
 O TLS termina no nginx; o tráfego entre nginx e Keycloak é HTTP simples na rede interna. O realm `dev` é importado automaticamente na primeira inicialização e já vem com o provedor de federação LDAP configurado.
@@ -61,7 +64,7 @@ O TLS termina no nginx; o tráfego entre nginx e Keycloak é HTTP simples na red
 |---|---|
 | `docker-compose.yml` | define os serviços postgres, keycloak, openldap, phpldapadmin e nginx |
 | `.env.example` | variáveis de ambiente do stack (copie para `.env`) |
-| `nginx/default.conf.template` | reverse proxy HTTPS + redirecionamento HTTP, processado por `envsubst` |
+| `nginx/default.conf.template` | reverse proxy HTTPS, redirecionamento HTTP, `/health`, `/phpldapadmin/` e `/flask/`, processado por `envsubst` |
 | `nginx/certs/` | certificados `fullchain.pem` e `privkey.pem` |
 | `nginx/certs/generate-dev-cert.sh` | gera o certificado self-signed de dev |
 | `nginx/phpldapadmin-http.conf` | VirtualHost do Apache com `Alias /phpldapadmin` (subpath) |
@@ -176,7 +179,7 @@ curl -k -X POST https://auk.ucs.br/realms/dev/protocol/openid-connect/token \
 
 ## Laboratório Flask + OpenID Connect
 
-Em `flask-oidc-client/` há três clients de exemplo que rodam no host com `uv` e autenticam contra o realm `dev`. Todos usam o fluxo **Authorization Code** com client **confidential**, e todos escutam na porta **5000** — portanto, rode **um de cada vez**.
+Em `flask-oidc-client/` há três clients de exemplo que rodam no host com `uv` e autenticam contra o realm `dev`. Todos usam o fluxo **Authorization Code** com client **confidential**, e todos escutam na porta **5000** — portanto, rode **um de cada vez**. O `app.py` pode ser acessado diretamente em `http://localhost:5000` ou pelo nginx da stack, no subpath `https://auk.ucs.br/flask/` (veja [Acessando pelo nginx](#acessando-pelo-nginx)).
 
 ### 1. Configurar o client no Keycloak
 
@@ -184,8 +187,8 @@ No console admin (`https://auk.ucs.br/admin`, realm `dev`), vá em **Clients →
 
 - Client ID: `flask-lab`, Client type: **Confidential**
 - Capability config: manter os defaults (Standard flow = Authorization Code)
-- Valid redirect URIs: `http://localhost:5000/callback`
-- Valid post logout redirect URIs: `http://localhost:5000/*`
+- Valid redirect URIs: `http://localhost:5000/callback` (acrescente `https://auk.ucs.br/flask/callback` se quiser acessar pelo nginx)
+- Valid post logout redirect URIs: `http://localhost:5000/*` (acrescente `https://auk.ucs.br/flask/*` para o nginx)
 - Após criar, abra a aba **Credentials** e copie o client secret.
 
 ### 2. Rodar
@@ -201,6 +204,24 @@ uv run python app.py
 Sem o `.env`, o app não sobe e avisa que falta o secret. Todas as outras variáveis já vêm com valores alinhados ao stack — **a única obrigatória é `OIDC_CLIENT_SECRET`** (aba Credentials do client no Keycloak).
 
 Abra `http://localhost:5000` e faça login com um usuário do LDAP (`fry` / `fry`, ...).
+
+### Acessando pelo nginx
+
+O app continua rodando no host (`uv run python app.py`), mas o nginx da stack pode serví-lo em **https://auk.ucs.br/flask/** (ou `https://localhost:8443/flask/` na variação de portas altas). O container alcança o host via `host.docker.internal`, configurado com `extra_hosts: host-gateway` no Compose. O Flask escuta em `0.0.0.0:5000` e usa `ProxyFix` com `X-Forwarded-Prefix: /flask` para manter os links dentro do subpath.
+
+Para esse modo, ajuste o `.env` do cliente:
+
+```dotenv
+OIDC_REDIRECT_URI=https://auk.ucs.br/flask/callback
+OIDC_POST_LOGOUT_REDIRECT_URI=https://auk.ucs.br/flask/
+```
+
+E cadastre as mesmas URLs no client `flask-lab` do Keycloak:
+
+- Valid redirect URIs: `https://auk.ucs.br/flask/callback` (e `https://localhost:8443/flask/callback`)
+- Valid post logout redirect URIs: `https://auk.ucs.br/flask/*` (e `https://localhost:8443/flask/*`)
+
+Mantenha as URLs de `http://localhost:5000` no client para não perder o acesso direto — alterne entre os dois perfis pelo `.env`. Como o `load_dotenv()` só lê o arquivo na inicialização, reinicie o app ao trocar de perfil. Com o Flask parado, o subpath responde `502`.
 
 ### Variáveis de ambiente
 
@@ -276,6 +297,7 @@ docker compose exec nginx nginx -s reload
 - A rede bridge usa `172.28.0.0/24` (gateway `172.28.0.1`): postgres `172.28.0.10`, keycloak `172.28.0.20`, nginx `172.28.0.30`, openldap `172.28.0.40` e phpldapadmin `172.28.0.50`.
 - Os dados persistem nos volumes `keycloak_postgres_data`, `keycloak_openldap_data`, `keycloak_openldap_config` e `keycloak_phpldapadmin_data` (nomes explícitos, sem prefixo do projeto).
 - O healthcheck do Keycloak usa a porta de management 9000 (`KC_HEALTH_ENABLED=true`); o nginx também expõe `/health` publicamente, fazendo proxy para essa porta. Métricas habilitadas com `KC_METRICS_ENABLED=true`.
+- O nginx alcança o app Flask no host via `host.docker.internal` (`extra_hosts: host-gateway` no Compose). O subpath `/flask/` depende do app rodando e escutando em `0.0.0.0:5000`.
 - O redirecionamento HTTP monta a URL com `NGINX_HTTPS_PORT`; quando a porta é 443, o sufixo é omitido.
 - O HSTS está comentado no template — habilite somente com certificado válido e domínio fixo.
 
@@ -290,6 +312,8 @@ docker compose exec nginx nginx -s reload
 | phpLDAPadmin volta com configuração antiga | `config.php` gerado em volume anônimo | mantenha `keycloak_phpldapadmin_data` montado em `/var/www/phpldapadmin` |
 | Client Flask falha TLS contra o Keycloak | certificado self-signed | use `OIDC_CA_BUNDLE=../nginx/certs/fullchain.pem` (nunca `verify=False`) |
 | O segundo app Flask não sobe | os três apps usam `localhost:5000` | rode um por vez ou configure portas/redirects diferentes |
+| `/flask/` retorna `502` | app parado ou ainda com o bind antigo em `127.0.0.1:5000` | reinicie `uv run python app.py` (o código agora escuta em `0.0.0.0`) |
+| Login via `/flask/` falha com `invalid_request_uri` | URLs do subpath não cadastradas no client `flask-lab` ou `.env` ainda no perfil A | cadastre `https://auk.ucs.br/flask/callback` no Keycloak e ajuste `OIDC_REDIRECT_URI` no `.env` do cliente |
 
 ## Limpeza
 

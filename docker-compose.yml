@@ -121,6 +121,9 @@ services:
       - "${NGINX_HTTPS_PORT:-443}:443"
     environment:
       NGINX_HTTPS_PORT: ${NGINX_HTTPS_PORT:-443}
+    # Permite que o nginx no container alcance o Flask rodando no host (porta 5000).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ./nginx/certs:/etc/nginx/certs:ro

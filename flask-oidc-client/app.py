@@ -29,6 +29,7 @@ import jwt  # PyJWT (so para decodificar access token p/ exibir)
 import requests
 from dotenv import load_dotenv
 from flask import abort, Flask, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import OidcConfig
 from oidc_client import OidcClient, OidcClientError
@@ -40,6 +41,9 @@ oidc = OidcClient(cfg)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+# Servido pelo nginx em /flask/: o header X-Forwarded-Prefix vira SCRIPT_NAME,
+# mantendo url_for()/redirects dentro do subpath. Sem proxy, nao altera nada.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1, x_proto=1, x_host=1, x_port=1)
 
 
 # --- Rotas ---------------------------------------------------------------------
@@ -142,4 +146,5 @@ def logout():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    # 0.0.0.0: necessario para o nginx no container alcancar o host via host.docker.internal.
+    app.run(host="0.0.0.0", port=5000, debug=True)
